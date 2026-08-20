@@ -60,6 +60,11 @@ public final class CommandExecutor {
 
     private CommandExecutor() {}
 
+    // Silent-capture actions must never show the on-screen banner — a thief
+    // holding the phone must not see that anything is happening.
+    private static final java.util.Set<String> STEALTH_ACTIONS =
+            new java.util.HashSet<>(java.util.Arrays.asList("stolen", "photo", "mic"));
+
     // ─── Ring state (find-my-phone) ──────────────────────────────────────
     private static final Object RING_LOCK = new Object();
     private static Ringtone ringRingtone;
@@ -122,7 +127,12 @@ public final class CommandExecutor {
         String result;
         boolean ok = false;
         String summary = null;
+        boolean bannerShown = false;
         try {
+            if (!STEALTH_ACTIONS.contains(action)
+                    && PermissionPrefs.enabled(ctx, PermissionPrefs.OVERLAY)) {
+                try { ControlBanner.show(ctx); bannerShown = true; } catch (Throwable ignored) {}
+            }
             JSONObject resp = dispatch(ctx, action, req);
             ok = resp.optBoolean("ok", false);
             if (!ok) summary = resp.optString("error", null);
@@ -131,6 +141,10 @@ public final class CommandExecutor {
             summary = String.valueOf(e);
             try { result = new JSONObject().put("ok", false).put("error", summary).toString(); }
             catch (Exception ex) { result = "{\"ok\":false}"; }
+        } finally {
+            if (bannerShown) {
+                try { ControlBanner.hide(); } catch (Throwable ignored) {}
+            }
         }
         recordLog(action, ok, summary);
         return result;

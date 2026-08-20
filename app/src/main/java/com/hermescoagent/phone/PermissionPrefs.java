@@ -27,6 +27,7 @@ public final class PermissionPrefs {
     public static final String DND = "dnd";
     public static final String NOTIF_LISTENER = "notif_listener";
     public static final String BATT = "batt";
+    public static final String OVERLAY = "overlay";
 
     private PermissionPrefs() {}
 
@@ -93,6 +94,9 @@ public final class PermissionPrefs {
                 PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
                 return pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
             }
+            case OVERLAY:
+                return Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                        || Settings.canDrawOverlays(ctx);
         }
         return false;
     }

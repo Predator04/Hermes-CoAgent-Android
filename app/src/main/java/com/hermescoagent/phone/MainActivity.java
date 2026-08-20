@@ -499,6 +499,23 @@ public class MainActivity extends Activity {
                         "2. Select 'Allow' (or 'Don't optimize')"
                 },
                 this::batteryExemptionIntent));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.OVERLAY,
+                "Display over other apps",
+                "To show a small 'being controlled' pill at the top of the screen while a command is running.",
+                Build.VERSION_CODES.M,
+                null,
+                new String[]{
+                        "1. Tap Open Settings",
+                        "2. Find Hermes CoAgent in the list",
+                        "3. Toggle 'Allow display over other apps' ON"
+                },
+                () -> {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    return i;
+                }));
     }
 
     private void addPermRow(LinearLayout root, PermSpec spec) {
