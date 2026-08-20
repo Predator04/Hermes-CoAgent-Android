@@ -11,12 +11,18 @@ Endpoints:
   POST /command   {"device_id","token","action":{...}}        -> {"ok":true,"command_id":"..."}
   GET  /poll?device_id=..&token=..   (long-poll, up to 25s)   -> {"commands":[{command_id, action}, ...]}
   POST /result    {"device_id","token","command_id","result"} -> {"ok":true}
-  GET  /result?device_id=..&command_id=..                     -> {"status":"done","result":..} or {"status":"pending"}
+  GET  /result?command_id=..&token=..[&device_id=..]          -> {"status":"done","result":..} or {"status":"pending"}
+  GET  /devices?token=..                                      -> {"ok":true,"devices":[...]}
+
+Auth: GET /result and /devices require `token` — either the registered token
+of the owning device, or the optional controller token in the env var
+HERMES_CONTROLLER_TOKEN.
 
 In-memory only. Restart wipes state. Stdlib only.
 """
 
 import json
+import os
 import sys
 import threading
 import time
@@ -29,8 +35,14 @@ POLL_TICK_SEC = 0.25
 MAX_BODY_BYTES = 512 * 1024
 RESULT_TTL_SEC = 300
 
+# Optional out-of-band controller token, set via env. When present, callers
+# may pass ?token=<CONTROLLER_TOKEN> to authenticate to GET /result and
+# /devices without knowing any device's token.
+_CONTROLLER_TOKEN = os.environ.get("HERMES_CONTROLLER_TOKEN", "").strip()
+
 _lock = threading.Lock()
 _tokens = {}          # device_id -> token
+_result_owner = {}    # command_id -> device_id (who submitted the result)
 _queues = {}          # device_id -> [ {command_id, action}, ... ]
 _results = {}         # command_id -> {"result": obj, "ts": epoch}
 _events = {}          # device_id -> threading.Event
@@ -49,12 +61,29 @@ def _prune_results_locked():
     stale = [cid for cid, r in _results.items() if r["ts"] < cutoff]
     for cid in stale:
         _results.pop(cid, None)
+        _result_owner.pop(cid, None)
 
 
 def _auth_ok(device_id, token):
     """Caller holds _lock (or accepts race — it's an in-memory demo)."""
     known = _tokens.get(device_id)
     return known is not None and known == token
+
+
+def _controller_auth_ok_locked(token, device_id=None):
+    """Token accepted if it matches the configured controller token, or
+    matches the specified device's registered token, or (when device_id is
+    None) matches ANY registered device token. Caller holds _lock."""
+    if not token:
+        return False
+    if _CONTROLLER_TOKEN and token == _CONTROLLER_TOKEN:
+        return True
+    if device_id is not None:
+        return _auth_ok(device_id, token)
+    for dev_token in _tokens.values():
+        if token == dev_token:
+            return True
+    return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -129,6 +158,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json(401, {"ok": False, "error": "unknown device or bad token"})
                 _prune_results_locked()
                 _results[command_id] = {"result": result, "ts": time.time()}
+                _result_owner[command_id] = device_id
             return self._send_json(200, {"ok": True})
 
         return self._send_json(404, {"ok": False, "error": "unknown endpoint"})
@@ -170,16 +200,33 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/result":
             command_id = qs.get("command_id")
+            token = qs.get("token")
+            device_id = qs.get("device_id")
             if not command_id:
                 return self._send_json(400, {"ok": False, "error": "command_id required"})
+            if not token:
+                return self._send_json(401, {"ok": False, "error": "token required"})
             with _lock:
+                # If caller passed device_id, the token must belong to that
+                # device (or the controller). Otherwise resolve the device
+                # from the result's owner so the token check is not just
+                # "any known token" — it must match the owning device.
+                owner = _result_owner.get(command_id)
+                bound_device = device_id or owner
+                if not _controller_auth_ok_locked(token, bound_device):
+                    return self._send_json(401, {"ok": False, "error": "bad token"})
                 r = _results.get(command_id)
             if r is None:
                 return self._send_json(200, {"status": "pending"})
             return self._send_json(200, {"status": "done", "result": r["result"]})
 
         if path == "/devices":
+            token = qs.get("token")
+            if not token:
+                return self._send_json(401, {"ok": False, "error": "token required"})
             with _lock:
+                if not _controller_auth_ok_locked(token):
+                    return self._send_json(401, {"ok": False, "error": "bad token"})
                 ids = list(_tokens.keys())
             return self._send_json(200, {"ok": True, "devices": ids})
 

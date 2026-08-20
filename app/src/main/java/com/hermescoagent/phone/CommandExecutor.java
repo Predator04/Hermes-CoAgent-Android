@@ -178,23 +178,74 @@ public final class CommandExecutor {
                 resp.put("apps", listLaunchableApps(ctx));
                 break;
             case "dump": {
+                if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
                 else {
                     JSONArray nodes = s.dumpNodes();
                     if (nodes == null) { resp.put("ok", false); resp.put("error", "dump timeout"); }
                     else {
+                        String pkg = s.getForegroundPackage();
+                        boolean sensitive = Redaction.isSensitivePackage(ctx, pkg);
+                        redactNodes(nodes, sensitive);
                         resp.put("nodes", nodes);
                         resp.put("count", nodes.length());
-                        resp.put("package", s.getForegroundPackage());
+                        resp.put("package", pkg);
+                        if (sensitive) resp.put("redacted", true);
                     }
                 }
                 break;
             }
             case "screenshot": {
+                if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
-                else return s.takeScreenshotToJson(req);
+                else {
+                    String pkg = s.getForegroundPackage();
+                    if (Redaction.isSensitivePackage(ctx, pkg)) {
+                        return new JSONObject()
+                                .put("ok", false)
+                                .put("error", "sensitive app")
+                                .put("redacted", true)
+                                .put("package", pkg);
+                    }
+                    return s.takeScreenshotToJson(req);
+                }
+                break;
+            }
+            case "notifications": {
+                if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
+                HermesNotificationListener nl = HermesNotificationListener.instance;
+                if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); }
+                else {
+                    JSONArray arr = nl.listActive(ctx);
+                    resp.put("notifications", arr);
+                    resp.put("count", arr.length());
+                }
+                break;
+            }
+            case "dismiss_notification": {
+                HermesNotificationListener nl = HermesNotificationListener.instance;
+                if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); break; }
+                String key = req.optString("key", "");
+                String pkg = req.optString("package", "");
+                if (!key.isEmpty()) {
+                    resp.put("ok", nl.cancelKey(key));
+                } else if (!pkg.isEmpty()) {
+                    int n = nl.cancelPackage(pkg);
+                    resp.put("ok", true);
+                    resp.put("cancelled", n);
+                } else {
+                    resp.put("ok", false);
+                    resp.put("error", "key or package required");
+                }
+                break;
+            }
+            case "privacy": {
+                if (req.has("on")) {
+                    Redaction.setPrivacyOn(ctx, req.optBoolean("on", false));
+                }
+                resp.put("privacy", Redaction.isPrivacyOn(ctx));
                 break;
             }
             case "find": {
@@ -884,6 +935,12 @@ public final class CommandExecutor {
     // ─────────────────────────────── snapshot ────────────────────────────
 
     private static void snapshot(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        if (Redaction.isPrivacyOn(ctx)) {
+            resp.put("ok", false);
+            resp.put("error", "privacy mode");
+            resp.put("privacy", true);
+            return;
+        }
         HermesAccessibilityService s = HermesAccessibilityService.instance;
         DisplayMetrics dm = readDisplayMetrics(ctx);
         JSONObject screen = new JSONObject();
@@ -895,7 +952,10 @@ public final class CommandExecutor {
         fillCharging(ctx, battery);
         resp.put("battery", battery);
         if (s != null) {
-            resp.put("package", s.getForegroundPackage());
+            String pkg = s.getForegroundPackage();
+            boolean sensitive = Redaction.isSensitivePackage(ctx, pkg);
+            resp.put("package", pkg);
+            if (sensitive) resp.put("redacted", true);
             JSONArray nodes = s.dumpNodes();
             if (nodes != null) {
                 resp.put("node_count", nodes.length());
@@ -906,15 +966,23 @@ public final class CommandExecutor {
                     if (n == null) continue;
                     String t = n.optString("text", "");
                     String d = n.optString("desc", "");
-                    if (!t.isEmpty()) digest.put(t);
-                    else if (!d.isEmpty()) digest.put(d);
+                    String pick = !t.isEmpty() ? t : d;
+                    if (pick.isEmpty()) continue;
+                    digest.put(sensitive ? Redaction.MASK : Redaction.redactText(pick));
                 }
                 resp.put("digest", digest);
             } else {
                 resp.put("node_count", -1);
             }
             if (req.optBoolean("include_screenshot", false)) {
-                resp.put("screenshot", s.takeScreenshotToJson(req));
+                if (sensitive) {
+                    resp.put("screenshot", new JSONObject()
+                            .put("ok", false)
+                            .put("error", "sensitive app")
+                            .put("redacted", true));
+                } else {
+                    resp.put("screenshot", s.takeScreenshotToJson(req));
+                }
             }
         } else {
             resp.put("package", "");
@@ -963,12 +1031,40 @@ public final class CommandExecutor {
             entry.put("timestamp", System.currentTimeMillis());
             entry.put("action", action == null ? "" : action);
             entry.put("ok", ok);
-            if (summary != null) entry.put("summary", summary);
+            if (summary != null) entry.put("summary", Redaction.redactText(summary));
             synchronized (LOG) {
                 if (LOG.size() >= LOG_CAPACITY) LOG.pollFirst();
                 LOG.offerLast(entry);
             }
         } catch (Exception ignored) {}
+    }
+
+    // ─────────────────────── privacy / redaction helpers ─────────────────
+
+    private static JSONObject privacyRefusal() throws Exception {
+        return new JSONObject()
+                .put("ok", false)
+                .put("error", "privacy mode")
+                .put("privacy", true);
+    }
+
+    private static void redactNodes(JSONArray nodes, boolean sensitive) {
+        if (nodes == null) return;
+        for (int i = 0; i < nodes.length(); i++) {
+            JSONObject n = nodes.optJSONObject(i);
+            if (n == null) continue;
+            try {
+                String t = n.optString("text", "");
+                String d = n.optString("desc", "");
+                if (sensitive) {
+                    if (!t.isEmpty()) n.put("text", Redaction.MASK);
+                    if (!d.isEmpty()) n.put("desc", Redaction.MASK);
+                } else {
+                    if (!t.isEmpty()) n.put("text", Redaction.redactText(t));
+                    if (!d.isEmpty()) n.put("desc", Redaction.redactText(d));
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private static JSONArray snapshotLog() {

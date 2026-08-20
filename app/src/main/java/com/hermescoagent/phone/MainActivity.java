@@ -254,6 +254,18 @@ public class MainActivity extends Activity {
         grantPerms.setOnClickListener(v -> showPermissionsDialog());
         root.addView(grantPerms);
 
+        Switch privacyToggle = new Switch(this);
+        privacyToggle.setText("  Privacy mode (block screenshot/dump/snapshot/notifications)");
+        privacyToggle.setTextColor(Color.WHITE);
+        privacyToggle.setChecked(Redaction.isPrivacyOn(this));
+        privacyToggle.setPadding(0, 24, 0, 8);
+        privacyToggle.setOnCheckedChangeListener((btn, checked) -> {
+            Redaction.setPrivacyOn(this, checked);
+            Toast.makeText(this, checked ? "Privacy mode ON" : "Privacy mode OFF",
+                    Toast.LENGTH_SHORT).show();
+        });
+        root.addView(privacyToggle);
+
         Button checkUpdates = new Button(this);
         checkUpdates.setText("Check for updates");
         checkUpdates.setOnClickListener(v -> {
@@ -285,7 +297,10 @@ public class MainActivity extends Activity {
                 "Agent-control: {\"action\":\"wait\",\"for\":\"OK\",\"until\":\"appear\",\"timeout_ms\":5000},\n" +
                 "  {\"action\":\"scroll\",\"direction\":\"down\"},\n" +
                 "  {\"action\":\"clipboard_get\"}, {\"action\":\"clipboard_set\",\"text\":\"…\"},\n" +
-                "  {\"action\":\"snapshot\"}, {\"action\":\"wake\"}, {\"action\":\"log\"}");
+                "  {\"action\":\"snapshot\"}, {\"action\":\"wake\"}, {\"action\":\"log\"}\n" +
+                "Notifications: {\"action\":\"notifications\"},\n" +
+                "  {\"action\":\"dismiss_notification\",\"key\":\"…\"} or {\"package\":\"…\"}\n" +
+                "Privacy: {\"action\":\"privacy\",\"on\":true|false} — locks screenshot/dump/snapshot/notifications");
         note.setTextSize(12);
         note.setTextColor(Color.parseColor("#8B949E"));
         note.setPadding(0, 20, 0, 0);
@@ -334,7 +349,18 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         boolean batt = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
-        return loc && cam && notif && dnd && batt;
+        boolean notifListener = isNotificationListenerEnabled();
+        return loc && cam && notif && dnd && batt && notifListener;
+    }
+
+    private boolean isNotificationListenerEnabled() {
+        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        if (flat == null || flat.isEmpty()) return false;
+        String needle = getPackageName() + "/" + HermesNotificationListener.class.getName();
+        for (String entry : flat.split(":")) {
+            if (entry.equals(needle)) return true;
+        }
+        return false;
     }
 
     private void showPermissionsDialog() {
@@ -353,10 +379,12 @@ public class MainActivity extends Activity {
             battOpt = pm.isIgnoringBatteryOptimizations(getPackageName());
         }
 
+        boolean notifListener = isNotificationListenerEnabled();
         String msg = "• Location (GPS): " + mark(loc) + "\n" +
                 "• Camera (flashlight): " + mark(cam) + "\n" +
                 "• Notifications (Android 13+): " + mark(notif) + "\n" +
                 "• Notification Policy (DND bypass for ring): " + mark(dnd) + "\n" +
+                "• Notification access (read/dismiss): " + mark(notifListener) + "\n" +
                 "• Battery optimization exempt (keep alive): " + mark(battOpt);
 
         AlertDialog.Builder b = new AlertDialog.Builder(this)
@@ -374,10 +402,20 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "Cannot open DND settings", Toast.LENGTH_SHORT).show();
                 }
             });
+        } else if (!notifListener) {
+            b.setNeutralButton("Notification access", (d, w) -> openNotificationListenerSettings());
         } else if (!battOpt && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             b.setNeutralButton("Battery exempt", (d, w) -> requestBatteryExempt());
         }
         b.show();
+    }
+
+    private void openNotificationListenerSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+        } catch (Exception e) {
+            Toast.makeText(this, "Cannot open notification-access settings", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void requestBatteryExempt() {
