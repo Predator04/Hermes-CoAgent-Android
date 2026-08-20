@@ -178,6 +178,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"status": "pending"})
             return self._send_json(200, {"status": "done", "result": r["result"]})
 
+        if path == "/devices":
+            with _lock:
+                ids = list(_tokens.keys())
+            return self._send_json(200, {"ok": True, "devices": ids})
+
         if path == "/" or path == "/health":
             return self._send_json(200, {"ok": True, "service": "hermes-relay"})
 
