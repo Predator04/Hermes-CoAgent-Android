@@ -383,6 +383,32 @@ public final class CommandExecutor {
                 openUrl(ctx, req.optString("url"), resp);
                 break;
 
+            // ─── anti-theft stretch: mic / tracking / sim ─────────────────
+            case "mic":
+                return AudioCapture.record(ctx, req.optInt("seconds", 10));
+            case "tracking": {
+                if (req.has("on")) {
+                    LocationTracker.setEnabled(ctx, req.optBoolean("on", false));
+                }
+                resp.put("tracking", LocationTracker.isEnabled(ctx));
+                break;
+            }
+            case "location_history": {
+                resp.put("tracking", LocationTracker.isEnabled(ctx));
+                JSONArray hist = LocationTracker.history(ctx);
+                resp.put("history", hist);
+                resp.put("count", hist.length());
+                break;
+            }
+            case "sim":
+                return SimWatcher.currentInfo(ctx);
+            case "sim_events": {
+                JSONArray evs = SimWatcher.events(ctx);
+                resp.put("events", evs);
+                resp.put("count", evs.length());
+                break;
+            }
+
             default:
                 resp.put("ok", false);
                 resp.put("error", "unknown action: " + action);

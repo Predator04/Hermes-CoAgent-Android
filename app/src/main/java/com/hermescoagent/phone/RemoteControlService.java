@@ -61,6 +61,8 @@ public class RemoteControlService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         startForeground();
         startServer();
+        // Resume periodic GPS breadcrumbs if the user previously enabled tracking.
+        LocationTracker.resumeIfEnabled(this);
         isRunning = true;
         return START_STICKY;
     }

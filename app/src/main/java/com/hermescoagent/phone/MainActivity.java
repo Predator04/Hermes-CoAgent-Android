@@ -300,7 +300,10 @@ public class MainActivity extends Activity {
                 "  {\"action\":\"snapshot\"}, {\"action\":\"wake\"}, {\"action\":\"log\"}\n" +
                 "Notifications: {\"action\":\"notifications\"},\n" +
                 "  {\"action\":\"dismiss_notification\",\"key\":\"…\"} or {\"package\":\"…\"}\n" +
-                "Privacy: {\"action\":\"privacy\",\"on\":true|false} — locks screenshot/dump/snapshot/notifications");
+                "Privacy: {\"action\":\"privacy\",\"on\":true|false} — locks screenshot/dump/snapshot/notifications\n" +
+                "Anti-theft: {\"action\":\"mic\",\"seconds\":10},\n" +
+                "  {\"action\":\"tracking\",\"on\":true|false}, {\"action\":\"location_history\"},\n" +
+                "  {\"action\":\"sim\"}, {\"action\":\"sim_events\"}");
         note.setTextSize(12);
         note.setTextColor(Color.parseColor("#8B949E"));
         note.setPadding(0, 20, 0, 0);
@@ -328,9 +331,19 @@ public class MainActivity extends Activity {
             need.add(Manifest.permission.ACCESS_COARSE_LOCATION);
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
             need.add(Manifest.permission.CAMERA);
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.RECORD_AUDIO);
+        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.READ_PHONE_STATE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        // Background location must be requested separately AFTER fine/coarse are granted (Android 11+).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
         }
         if (!need.isEmpty()) {
             requestPermissions(need.toArray(new String[0]), REQ_RUNTIME_PERMS);
@@ -342,6 +355,12 @@ public class MainActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean mic = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        boolean phone = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
+        boolean bgLoc = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -350,7 +369,7 @@ public class MainActivity extends Activity {
         boolean batt = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
         boolean notifListener = isNotificationListenerEnabled();
-        return loc && cam && notif && dnd && batt && notifListener;
+        return loc && cam && mic && phone && bgLoc && notif && dnd && batt && notifListener;
     }
 
     private boolean isNotificationListenerEnabled() {
@@ -368,6 +387,12 @@ public class MainActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean mic = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        boolean phone = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
+        boolean bgLoc = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         boolean dnd = false;
@@ -381,7 +406,10 @@ public class MainActivity extends Activity {
 
         boolean notifListener = isNotificationListenerEnabled();
         String msg = "• Location (GPS): " + mark(loc) + "\n" +
-                "• Camera (flashlight): " + mark(cam) + "\n" +
+                "• Background location (tracking): " + mark(bgLoc) + "\n" +
+                "• Camera (flashlight/photo): " + mark(cam) + "\n" +
+                "• Microphone (ambient audio): " + mark(mic) + "\n" +
+                "• Phone state (SIM info): " + mark(phone) + "\n" +
                 "• Notifications (Android 13+): " + mark(notif) + "\n" +
                 "• Notification Policy (DND bypass for ring): " + mark(dnd) + "\n" +
                 "• Notification access (read/dismiss): " + mark(notifListener) + "\n" +
@@ -391,7 +419,7 @@ public class MainActivity extends Activity {
                 .setTitle("Permissions")
                 .setMessage(msg)
                 .setNegativeButton("Close", (d, w) -> d.dismiss());
-        if (!loc || !cam || !notif) {
+        if (!loc || !cam || !mic || !phone || !bgLoc || !notif) {
             b.setPositiveButton("Request runtime", (d, w) -> requestRuntimePermissionsOnFirstUse());
         }
         if (!dnd) {
