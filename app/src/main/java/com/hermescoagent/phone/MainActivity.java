@@ -47,6 +47,7 @@ public class MainActivity extends Activity {
     private Button grantAccessibility;
     private Button startServer;
     private Button grantPermsButton;
+    private TextView permsSummaryView;
 
     private final List<PermSpec> permSpecs = new ArrayList<>();
 
@@ -395,6 +396,15 @@ public class MainActivity extends Activity {
         subtitle.setPadding(0, 0, 0, 12);
         root.addView(subtitle);
 
+        permsSummaryView = new TextView(this);
+        permsSummaryView.setTextSize(13);
+        permsSummaryView.setPadding(0, 0, 0, 12);
+        LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        permsSummaryView.setLayoutParams(summaryLp);
+        root.addView(permsSummaryView);
+
         grantPermsButton = new Button(this);
         grantPermsButton.setText("Grant permissions");
         grantPermsButton.setOnClickListener(v -> onGrantAllClicked());
@@ -678,16 +688,38 @@ public class MainActivity extends Activity {
 
     private void refreshPermissions() {
         boolean anyPending = false;
+        int applicable = 0;
+        List<String> missingLabels = new ArrayList<>();
         for (PermSpec s : permSpecs) {
             s.refresh();
-            if (s.applicable()
-                    && PermissionPrefs.wants(this, s.key)
-                    && !PermissionPrefs.isGranted(this, s.key)) {
-                anyPending = true;
-            }
+            if (!s.applicable()) continue;
+            applicable++;
+            if (!PermissionPrefs.wants(this, s.key)) continue;
+            if (PermissionPrefs.isGranted(this, s.key)) continue;
+            anyPending = true;
+            missingLabels.add(s.label);
         }
         if (grantPermsButton != null) {
             grantPermsButton.setVisibility(anyPending ? View.VISIBLE : View.GONE);
+        }
+        if (permsSummaryView != null) {
+            if (applicable == 0) {
+                permsSummaryView.setText("No permissions required");
+                permsSummaryView.setTextColor(Color.parseColor("#8B949E"));
+            } else if (missingLabels.isEmpty()) {
+                permsSummaryView.setText("✅ All permissions granted");
+                permsSummaryView.setTextColor(Color.parseColor("#3FB950"));
+            } else {
+                int n = missingLabels.size();
+                StringBuilder sb = new StringBuilder("⚠️ ");
+                sb.append(n).append(n == 1 ? " permission not enabled: " : " permissions not enabled: ");
+                for (int i = 0; i < missingLabels.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(missingLabels.get(i));
+                }
+                permsSummaryView.setText(sb.toString());
+                permsSummaryView.setTextColor(Color.parseColor("#D29922"));
+            }
         }
     }
 
