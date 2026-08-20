@@ -12,6 +12,8 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
@@ -43,6 +45,8 @@ public final class PhotoCapture {
     private static final long OPEN_TIMEOUT_MS = 5000L;
     private static final long SESSION_TIMEOUT_MS = 5000L;
     private static final long CAPTURE_TIMEOUT_MS = 6000L;
+    private static final long AE_CONVERGE_TIMEOUT_MS = 800L;
+    private static final long AE_PRECAPTURE_SETTLE_MS = 120L;
     private static final int MAX_IMAGES = 2;
     // Cap picked JPEG size around 4 MP for reasonable base64 payloads.
     private static final long SIZE_CAP_PIXELS = 4L * 1024 * 1024;
@@ -234,12 +238,68 @@ public final class PhotoCapture {
                 return resp;
             }
 
+            // Prime AE/AWB with a repeating preview so the still isn't metered
+            // from a cold sensor (which comes back near-black). Any failure here
+            // falls through to the original direct-still path.
+            boolean repeatingStarted = false;
+            try {
+                CaptureRequest.Builder pb = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                pb.addTarget(dummySurface);
+                pb.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+                pb.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON);
+                pb.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO);
+                pb.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+                final CountDownLatch aeLatch = new CountDownLatch(1);
+                CameraCaptureSession.CaptureCallback aeCb = new CameraCaptureSession.CaptureCallback() {
+                    @Override public void onCaptureCompleted(CameraCaptureSession s,
+                                                             CaptureRequest req,
+                                                             TotalCaptureResult result) {
+                        Integer ae = result.get(CaptureResult.CONTROL_AE_STATE);
+                        // Null AE_STATE => device doesn't report it; assume ready.
+                        if (ae == null
+                                || ae == CameraMetadata.CONTROL_AE_STATE_CONVERGED
+                                || ae == CameraMetadata.CONTROL_AE_STATE_FLASH_REQUIRED
+                                || ae == CameraMetadata.CONTROL_AE_STATE_LOCKED) {
+                            aeLatch.countDown();
+                        }
+                    }
+                };
+
+                session.setRepeatingRequest(pb.build(), aeCb, handler);
+                repeatingStarted = true;
+                aeLatch.await(AE_CONVERGE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+
+                // Precapture trigger locks the metered exposure for the still.
+                try {
+                    CaptureRequest.Builder tb = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                    tb.addTarget(dummySurface);
+                    tb.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+                    tb.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON);
+                    tb.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO);
+                    tb.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                    tb.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                            CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+                    session.capture(tb.build(), null, handler);
+                    Thread.sleep(AE_PRECAPTURE_SETTLE_MS);
+                } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+                // Preview/AE priming failed — proceed with the direct still capture.
+            }
+
+            if (repeatingStarted) {
+                try { session.stopRepeating(); } catch (Throwable ignored) {}
+            }
+
             try {
                 CaptureRequest.Builder rb = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
                 rb.addTarget(reader.getSurface());
                 rb.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                 rb.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON);
+                rb.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO);
                 rb.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                rb.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                        CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE);
                 rb.set(CaptureRequest.JPEG_ORIENTATION, rotation);
                 session.capture(rb.build(), null, handler);
             } catch (CameraAccessException | IllegalStateException e) {
