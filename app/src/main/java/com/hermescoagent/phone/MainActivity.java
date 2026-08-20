@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private Switch remoteToggle;
     private Button grantAccessibility;
     private Button startServer;
+    private Button grantPerms;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -242,7 +243,7 @@ public class MainActivity extends Activity {
             renderRemoteStatus(RemoteRelayClient.Status.OFF, "");
         }
 
-        Button grantPerms = new Button(this);
+        grantPerms = new Button(this);
         grantPerms.setText("Grant permissions (location / DND / camera / battery)");
         grantPerms.setOnClickListener(v -> showPermissionsDialog());
         root.addView(grantPerms);
@@ -313,6 +314,21 @@ public class MainActivity extends Activity {
         if (!need.isEmpty()) {
             requestPermissions(need.toArray(new String[0]), REQ_RUNTIME_PERMS);
         }
+    }
+
+    private boolean allPermissionsGranted() {
+        boolean loc = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        boolean dnd = nm != null && nm.isNotificationPolicyAccessGranted();
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        boolean batt = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
+        return loc && cam && notif && dnd && batt;
     }
 
     private void showPermissionsDialog() {
@@ -433,6 +449,9 @@ public class MainActivity extends Activity {
                     ? "Running: remote control on :" + RemoteControlService.PORT
                     : "2. Start Remote Control");
             startServer.setEnabled(!running);
+        }
+        if (grantPerms != null) {
+            grantPerms.setVisibility(allPermissionsGranted() ? View.GONE : View.VISIBLE);
         }
     }
 
