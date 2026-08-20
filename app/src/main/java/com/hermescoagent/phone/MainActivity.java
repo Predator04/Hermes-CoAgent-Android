@@ -17,10 +17,13 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,6 +34,9 @@ public class MainActivity extends Activity {
 
     private TextView statusView;
     private TextView tokenView;
+    private TextView remoteStatusView;
+    private EditText relayUrlField;
+    private Switch remoteToggle;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,6 +118,81 @@ public class MainActivity extends Activity {
         });
         root.addView(startServer);
 
+        // ─── Remote Mode section ─────────────────────────────────────────
+        TextView remoteHeader = new TextView(this);
+        remoteHeader.setText("Remote Mode (works over cellular)");
+        remoteHeader.setTextSize(16);
+        remoteHeader.setTextColor(Color.WHITE);
+        remoteHeader.setTypeface(null, Typeface.BOLD);
+        remoteHeader.setPadding(0, 32, 0, 8);
+        root.addView(remoteHeader);
+
+        TextView remoteHelp = new TextView(this);
+        remoteHelp.setText("Dial out to a relay server so the controller can reach this phone " +
+                "even when carrier NAT blocks incoming connections. Uses the same auth token.");
+        remoteHelp.setTextSize(12);
+        remoteHelp.setTextColor(Color.parseColor("#8B949E"));
+        remoteHelp.setPadding(0, 0, 0, 8);
+        root.addView(remoteHelp);
+
+        TextView relayLabel = new TextView(this);
+        relayLabel.setText("Relay base URL (e.g. https://your-relay.example.com):");
+        relayLabel.setTextSize(12);
+        relayLabel.setTextColor(Color.parseColor("#8B949E"));
+        relayLabel.setPadding(0, 8, 0, 4);
+        root.addView(relayLabel);
+
+        relayUrlField = new EditText(this);
+        relayUrlField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        relayUrlField.setSingleLine(true);
+        relayUrlField.setTextColor(Color.WHITE);
+        relayUrlField.setHintTextColor(Color.parseColor("#6E7681"));
+        relayUrlField.setHint("https://…");
+        relayUrlField.setText(RemoteRelayClient.getRelayUrl(this));
+        root.addView(relayUrlField);
+
+        remoteToggle = new Switch(this);
+        remoteToggle.setText("  Enable Remote Mode");
+        remoteToggle.setTextColor(Color.WHITE);
+        remoteToggle.setChecked(RemoteRelayClient.isEnabled(this));
+        remoteToggle.setPadding(0, 16, 0, 8);
+        root.addView(remoteToggle);
+
+        remoteStatusView = new TextView(this);
+        remoteStatusView.setTextSize(13);
+        remoteStatusView.setTypeface(Typeface.MONOSPACE);
+        remoteStatusView.setTextColor(Color.parseColor("#8B949E"));
+        remoteStatusView.setPadding(0, 0, 0, 8);
+        root.addView(remoteStatusView);
+
+        remoteToggle.setOnCheckedChangeListener((btn, checked) -> {
+            String url = relayUrlField.getText().toString().trim();
+            RemoteRelayClient.setRelayUrl(this, url);
+            RemoteRelayClient.setEnabled(this, checked);
+            RemoteRelayClient client = RemoteRelayClient.get(this);
+            if (checked) {
+                if (url.isEmpty()) {
+                    Toast.makeText(this, "Enter a relay URL first", Toast.LENGTH_SHORT).show();
+                    remoteToggle.setChecked(false);
+                    RemoteRelayClient.setEnabled(this, false);
+                    return;
+                }
+                client.setStatusListener(this::onRemoteStatusChanged);
+                client.start();
+            } else {
+                client.stop();
+            }
+        });
+
+        // If Remote Mode was previously enabled, auto-resume.
+        if (RemoteRelayClient.isEnabled(this) && !RemoteRelayClient.getRelayUrl(this).isEmpty()) {
+            RemoteRelayClient client = RemoteRelayClient.get(this);
+            client.setStatusListener(this::onRemoteStatusChanged);
+            client.start();
+        } else {
+            renderRemoteStatus(RemoteRelayClient.Status.OFF, "");
+        }
+
         Button checkUpdates = new Button(this);
         checkUpdates.setText("Check for updates");
         checkUpdates.setOnClickListener(v -> {
@@ -165,6 +246,37 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Later", (d, w) -> d.dismiss())
                 .show();
+    }
+
+    private void onRemoteStatusChanged(RemoteRelayClient.Status s, String detail) {
+        runOnUiThread(() -> renderRemoteStatus(s, detail));
+    }
+
+    private void renderRemoteStatus(RemoteRelayClient.Status s, String detail) {
+        if (remoteStatusView == null) return;
+        String text;
+        int color;
+        switch (s) {
+            case CONNECTED:
+                text = "remote: connected" + (detail == null || detail.isEmpty() ? "" : " → " + detail);
+                color = Color.parseColor("#7EE787");
+                break;
+            case CONNECTING:
+                text = "remote: connecting" + (detail == null || detail.isEmpty() ? "" : " → " + detail);
+                color = Color.parseColor("#F0B72F");
+                break;
+            case ERROR:
+                text = "remote: error" + (detail == null || detail.isEmpty() ? "" : " (" + detail + ")");
+                color = Color.parseColor("#F85149");
+                break;
+            case OFF:
+            default:
+                text = "remote: off";
+                color = Color.parseColor("#8B949E");
+                break;
+        }
+        remoteStatusView.setText(text);
+        remoteStatusView.setTextColor(color);
     }
 
     private void updateStatus() {
