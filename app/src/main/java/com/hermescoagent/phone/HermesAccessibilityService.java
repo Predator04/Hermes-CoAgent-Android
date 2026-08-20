@@ -2,6 +2,8 @@ package com.hermescoagent.phone;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.ColorSpace;
@@ -113,7 +115,38 @@ public class HermesAccessibilityService extends AccessibilityService {
         }
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return true;
+        // Fallback: set clipboard + paste on focused node.
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("hermes", text));
+                return node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /** Scroll the first scrollable node in the tree. dir=true → forward/down. */
+    public boolean scroll(boolean forward) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        AccessibilityNodeInfo n = findFirstScrollable(root);
+        if (n == null) return false;
+        int action = forward
+                ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+        return n.performAction(action);
+    }
+
+    private AccessibilityNodeInfo findFirstScrollable(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        if (node.isScrollable()) return node;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo r = findFirstScrollable(node.getChild(i));
+            if (r != null) return r;
+        }
+        return null;
     }
 
     private AccessibilityNodeInfo findFocusedEditable(AccessibilityNodeInfo node) {

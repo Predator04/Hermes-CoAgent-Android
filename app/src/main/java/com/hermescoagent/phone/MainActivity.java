@@ -1,11 +1,14 @@
 package com.hermescoagent.phone;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.ConnectivityManager;
@@ -13,9 +16,11 @@ import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.View;
@@ -30,6 +35,8 @@ import android.widget.Toast;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
 
@@ -235,6 +242,11 @@ public class MainActivity extends Activity {
             renderRemoteStatus(RemoteRelayClient.Status.OFF, "");
         }
 
+        Button grantPerms = new Button(this);
+        grantPerms.setText("Grant permissions (location / DND / camera / battery)");
+        grantPerms.setOnClickListener(v -> showPermissionsDialog());
+        root.addView(grantPerms);
+
         Button checkUpdates = new Button(this);
         checkUpdates.setText("Check for updates");
         checkUpdates.setOnClickListener(v -> {
@@ -258,7 +270,15 @@ public class MainActivity extends Activity {
                 "{\"action\":\"key\",\"code\":\"back\"}\n" +
                 "{\"action\":\"launch\",\"package\":\"com.android.settings\"}\n" +
                 "{\"action\":\"screen_size\"}  /  {\"action\":\"list_apps\"}\n" +
-                "{\"action\":\"battery\"}  /  {\"action\":\"info\"}  /  {\"action\":\"ping\"}");
+                "{\"action\":\"battery\"}  /  {\"action\":\"info\"}  /  {\"action\":\"ping\"}\n" +
+                "Find-my-phone: {\"action\":\"ring\"}, {\"action\":\"stop_ring\"},\n" +
+                "  {\"action\":\"location\"}, {\"action\":\"flashlight\",\"on\":true},\n" +
+                "  {\"action\":\"speak\",\"text\":\"hi\"}, {\"action\":\"vibrate\"},\n" +
+                "  {\"action\":\"wifi\"}, {\"action\":\"charging\"}, {\"action\":\"find_phone\"}\n" +
+                "Agent-control: {\"action\":\"wait\",\"for\":\"OK\",\"until\":\"appear\",\"timeout_ms\":5000},\n" +
+                "  {\"action\":\"scroll\",\"direction\":\"down\"},\n" +
+                "  {\"action\":\"clipboard_get\"}, {\"action\":\"clipboard_set\",\"text\":\"…\"},\n" +
+                "  {\"action\":\"snapshot\"}, {\"action\":\"wake\"}, {\"action\":\"log\"}");
         note.setTextSize(12);
         note.setTextColor(Color.parseColor("#8B949E"));
         note.setPadding(0, 20, 0, 0);
@@ -268,10 +288,87 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         updateStatus();
 
+        requestRuntimePermissionsOnFirstUse();
+
         UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl) -> {
             if (available) showUpdateDialog(code, name1, apkUrl);
         });
     }
+
+    private static final int REQ_RUNTIME_PERMS = 4711;
+
+    private void requestRuntimePermissionsOnFirstUse() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        List<String> need = new ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.CAMERA);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!need.isEmpty()) {
+            requestPermissions(need.toArray(new String[0]), REQ_RUNTIME_PERMS);
+        }
+    }
+
+    private void showPermissionsDialog() {
+        boolean loc = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        boolean dnd = false;
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) dnd = nm.isNotificationPolicyAccessGranted();
+        boolean battOpt = false;
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            battOpt = pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+
+        String msg = "• Location (GPS): " + mark(loc) + "\n" +
+                "• Camera (flashlight): " + mark(cam) + "\n" +
+                "• Notifications (Android 13+): " + mark(notif) + "\n" +
+                "• Notification Policy (DND bypass for ring): " + mark(dnd) + "\n" +
+                "• Battery optimization exempt (keep alive): " + mark(battOpt);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("Permissions")
+                .setMessage(msg)
+                .setNegativeButton("Close", (d, w) -> d.dismiss());
+        if (!loc || !cam || !notif) {
+            b.setPositiveButton("Request runtime", (d, w) -> requestRuntimePermissionsOnFirstUse());
+        }
+        if (!dnd) {
+            b.setNeutralButton("DND access", (d, w) -> {
+                try {
+                    startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
+                } catch (Exception e) {
+                    Toast.makeText(this, "Cannot open DND settings", Toast.LENGTH_SHORT).show();
+                }
+            });
+        } else if (!battOpt && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            b.setNeutralButton("Battery exempt", (d, w) -> requestBatteryExempt());
+        }
+        b.show();
+    }
+
+    private void requestBatteryExempt() {
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "Cannot open battery settings", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private static String mark(boolean ok) { return ok ? "granted" : "NOT granted"; }
 
     private void showUpdateDialog(int latestCode, String releaseName, String apkUrl) {
         if (isFinishing()) return;
