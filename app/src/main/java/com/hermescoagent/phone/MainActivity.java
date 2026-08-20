@@ -1,6 +1,7 @@
 package com.hermescoagent.phone;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -111,6 +112,20 @@ public class MainActivity extends Activity {
         });
         root.addView(startServer);
 
+        Button checkUpdates = new Button(this);
+        checkUpdates.setText("Check for updates");
+        checkUpdates.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Checking for updates…", Toast.LENGTH_SHORT).show();
+            UpdateChecker.checkForUpdate(MainActivity.this, true, (available, code, name1, apkUrl) -> {
+                if (available) {
+                    showUpdateDialog(code, name1, apkUrl);
+                } else {
+                    Toast.makeText(MainActivity.this, "You're on the latest version.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
+        root.addView(checkUpdates);
+
         TextView note = new TextView(this);
         note.setText("Commands are sent to http://<this-ip>:8765/cmd as JSON with the\n" +
                 "X-Hermes-Token header. Examples:\n" +
@@ -129,6 +144,27 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         updateStatus();
+
+        UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl) -> {
+            if (available) showUpdateDialog(code, name1, apkUrl);
+        });
+    }
+
+    private void showUpdateDialog(int latestCode, String releaseName, String apkUrl) {
+        if (isFinishing()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Update Available")
+                .setMessage("Version " + releaseName + " is available.")
+                .setPositiveButton("Update Now", (d, w) -> {
+                    UpdateChecker.downloadAndInstall(MainActivity.this, apkUrl);
+                    d.dismiss();
+                })
+                .setNeutralButton("Skip This Version", (d, w) -> {
+                    UpdateChecker.skipVersion(MainActivity.this, latestCode);
+                    d.dismiss();
+                })
+                .setNegativeButton("Later", (d, w) -> d.dismiss())
+                .show();
     }
 
     private void updateStatus() {
