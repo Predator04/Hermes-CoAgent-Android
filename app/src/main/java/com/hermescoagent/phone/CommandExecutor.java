@@ -186,7 +186,16 @@ public final class CommandExecutor {
             case "launch": {
                 Intent i = ctx.getPackageManager().getLaunchIntentForPackage(req.optString("package"));
                 if (i == null) { resp.put("ok", false); resp.put("error", "package not found"); }
-                else { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); ctx.startActivity(i); }
+                else {
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                    try {
+                        ctx.startActivity(i);
+                        resp.put("ok", true);
+                    } catch (Exception e) {
+                        resp.put("ok", false);
+                        resp.put("error", "launch failed: " + e.getMessage());
+                    }
+                }
                 break;
             }
             case "battery":
