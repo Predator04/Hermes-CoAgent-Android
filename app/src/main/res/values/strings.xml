@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_desc">Lets Hermes control this phone remotely — tap, swipe, type, and navigate. Only enable if you trust the Hermes assistant you connected it to.</string>
+</resources>
