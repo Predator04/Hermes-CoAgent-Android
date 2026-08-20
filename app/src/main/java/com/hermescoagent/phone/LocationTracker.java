@@ -12,6 +12,7 @@ import android.os.CancellationSignal;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -37,6 +38,22 @@ public final class LocationTracker {
     private static final Object LOCK = new Object();
     private static ScheduledExecutorService scheduler;
     private static ScheduledFuture<?> task;
+    // Shared executor for the getCurrentLocation callback dispatch. Creating a
+    // fresh single-thread executor per poll leaked one non-daemon thread every
+    // 5 minutes forever.
+    private static ExecutorService callbackExec;
+    private static ExecutorService callbackExec() {
+        synchronized (LOCK) {
+            if (callbackExec == null) {
+                callbackExec = Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "hermes-loc-cb");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            return callbackExec;
+        }
+    }
 
     public static boolean isEnabled(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -119,7 +136,7 @@ public final class LocationTracker {
             }
             CancellationSignal cs = new CancellationSignal();
             lm.getCurrentLocation(provider, cs,
-                    Executors.newSingleThreadExecutor(),
+                    callbackExec(),
                     location -> {
                         synchronized (lk) { out[0] = location; done[0] = true; lk.notifyAll(); }
                     });

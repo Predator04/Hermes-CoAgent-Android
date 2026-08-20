@@ -28,6 +28,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -334,6 +335,20 @@ public class HermesAccessibilityService extends AccessibilityService {
     private static final float DEFAULT_SCREENSHOT_SCALE = 0.5f;
     private static final int DEFAULT_JPEG_QUALITY = 70;
 
+    // Shared executor for takeScreenshot callbacks. Previously we created a new
+    // single-thread executor per call — each leaked a live thread forever.
+    private static ExecutorService screenshotCallbackExec;
+    private static synchronized ExecutorService screenshotCallbackExec() {
+        if (screenshotCallbackExec == null) {
+            screenshotCallbackExec = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "hermes-shot-cb");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        return screenshotCallbackExec;
+    }
+
     /**
      * Capture the current screen using AccessibilityService.takeScreenshot (API 30+).
      * Saves a JPEG to the app cache dir and returns { ok, path, width, height,
@@ -363,7 +378,7 @@ public class HermesAccessibilityService extends AccessibilityService {
 
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY,
-                    Executors.newSingleThreadExecutor(),
+                    screenshotCallbackExec(),
                     new TakeScreenshotCallback() {
                         @Override
                         public void onSuccess(ScreenshotResult result) {

@@ -133,10 +133,20 @@ public final class PhotoCapture {
             final AtomicReference<CameraCaptureSession> sessionRef = new AtomicReference<>();
             final AtomicReference<String> errorMsgRef = new AtomicReference<>();
             final CountDownLatch openLatch = new CountDownLatch(1);
+            // Set on the main thread when we've given up waiting; if the camera
+            // then opens late, the callback closes it immediately instead of
+            // leaking a CameraDevice reference nobody will release.
+            final java.util.concurrent.atomic.AtomicBoolean abandoned =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
 
             try {
                 cm.openCamera(cameraId, new CameraDevice.StateCallback() {
                     @Override public void onOpened(CameraDevice camera) {
+                        if (abandoned.get()) {
+                            try { camera.close(); } catch (Throwable ignored) {}
+                            openLatch.countDown();
+                            return;
+                        }
                         deviceRef.set(camera);
                         openLatch.countDown();
                     }
@@ -168,6 +178,11 @@ public final class PhotoCapture {
             }
 
             if (!openLatch.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                abandoned.set(true);
+                // Callback may have raced and stored a device between our timeout
+                // and setting abandoned; close whichever side wins.
+                CameraDevice late = deviceRef.getAndSet(null);
+                if (late != null) try { late.close(); } catch (Throwable ignored) {}
                 cleanup(reader, dummySurface, st, ht, null, null);
                 resp.put("ok", false);
                 resp.put("error", "camera open timeout");
@@ -241,6 +256,15 @@ public final class PhotoCapture {
             File dir = new File(ctx.getCacheDir(), "photos");
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
+            // Purge previous photos so multi-MB JPEGs don't accumulate in the
+            // app-private cache (potential exposure via backup or root).
+            File[] existing = dir.listFiles();
+            if (existing != null) {
+                for (File f : existing) {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
             File out = new File(dir, "photo-" + System.currentTimeMillis() + "-" + cam + ".jpg");
             try (FileOutputStream fos = new FileOutputStream(out)) {
                 fos.write(jpeg);

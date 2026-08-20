@@ -36,6 +36,15 @@ public final class AudioCapture {
             File dir = new File(ctx.getCacheDir(), "audio");
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
+            // Purge previous recordings so the cache doesn't accumulate
+            // (potential exposure via backup or root); base64 is in the response.
+            File[] existing = dir.listFiles();
+            if (existing != null) {
+                for (File f : existing) {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
             File out = new File(dir, "rec-" + System.currentTimeMillis() + ".m4a");
 
             MediaRecorder mr = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S

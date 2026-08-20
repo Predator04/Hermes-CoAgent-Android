@@ -45,6 +45,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -87,6 +88,23 @@ public final class CommandExecutor {
     // ─── Command log ring buffer ─────────────────────────────────────────
     private static final int LOG_CAPACITY = 50;
     private static final Deque<JSONObject> LOG = new ArrayDeque<>();
+
+    // Shared executor for location + wake-callback dispatches. Creating a new
+    // single-thread executor per call leaked a thread every time.
+    private static final Object CB_EXEC_LOCK = new Object();
+    private static ExecutorService locationCallbackExec;
+    private static ExecutorService locationCallbackExec() {
+        synchronized (CB_EXEC_LOCK) {
+            if (locationCallbackExec == null) {
+                locationCallbackExec = Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "hermes-loc-cb");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            return locationCallbackExec;
+        }
+    }
 
     public static String execute(Context ctx, String json) {
         String action = "";
@@ -630,6 +648,12 @@ public final class CommandExecutor {
         try {
             Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
             if (v == null || !v.hasVibrator()) return;
+            // Cancel any previous ring vibration so back-to-back ring/find_phone
+            // calls don't stack an unstoppable loop on the abandoned handle.
+            if (ringVibrator != null) {
+                try { ringVibrator.cancel(); } catch (Throwable ignored) {}
+                ringVibrator = null;
+            }
             long[] pattern = { 0, 600, 300 };
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 v.vibrate(VibrationEffect.createWaveform(pattern, 0));
@@ -711,7 +735,7 @@ public final class CommandExecutor {
             }
             CancellationSignal cs = new CancellationSignal();
             lm.getCurrentLocation(provider, cs,
-                    Executors.newSingleThreadExecutor(),
+                    locationCallbackExec(),
                     location -> {
                         synchronized (lock) { out[0] = location; done[0] = true; lock.notifyAll(); }
                     });
@@ -1067,7 +1091,23 @@ public final class CommandExecutor {
             if (url == null || url.isEmpty()) {
                 resp.put("ok", false); resp.put("error", "url required"); return;
             }
-            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            Uri parsed = Uri.parse(url);
+            String scheme = parsed.getScheme() == null ? "" : parsed.getScheme().toLowerCase(java.util.Locale.ROOT);
+            // Restrict to safe view schemes. intent://, content://, file://,
+            // android-app://, and android.resource:// can invoke arbitrary
+            // components or expose private files — refuse them even from a
+            // token-bearing controller so a compromised token can't pivot.
+            switch (scheme) {
+                case "http": case "https":
+                case "mailto": case "tel": case "sms": case "smsto":
+                case "geo": case "market": case "maps":
+                    break;
+                default:
+                    resp.put("ok", false);
+                    resp.put("error", "scheme not allowed: " + scheme);
+                    return;
+            }
+            Intent i = new Intent(Intent.ACTION_VIEW, parsed);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 ctx.startActivity(i);
