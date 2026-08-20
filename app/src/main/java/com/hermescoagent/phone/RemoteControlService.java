@@ -52,6 +52,9 @@ public class RemoteControlService extends Service {
     public void onCreate() {
         super.onCreate();
         authToken = ensureToken(this);
+        // If a previous process was killed mid-ring, our DND filter and audio
+        // volumes may be stuck in the "ringing" state. Restore them now.
+        CommandExecutor.restoreCrashedRingState(this);
     }
 
     @Override

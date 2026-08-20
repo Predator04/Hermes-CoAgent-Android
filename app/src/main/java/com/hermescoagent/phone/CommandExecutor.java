@@ -7,6 +7,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
@@ -45,6 +46,9 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Shared command dispatcher. Called by both the LAN HTTP server
@@ -67,6 +71,18 @@ public final class CommandExecutor {
 
     // ─── TTS ─────────────────────────────────────────────────────────────
     private static TextToSpeech tts;
+    private static volatile boolean ttsReady;
+
+    // ─── find_phone safety auto-stop ─────────────────────────────────────
+    private static ScheduledExecutorService findPhoneScheduler;
+    private static ScheduledFuture<?> findPhoneAutoStopTask;
+    private static final long FIND_PHONE_AUTO_STOP_MS = 30_000L;
+
+    // ─── Persisted ring state (recovers if process is killed mid-ring) ───
+    private static final String RING_PREFS = "hermes_ring_state";
+    private static final String KEY_SAVED_DND = "saved_dnd";
+    private static final String KEY_SAVED_ALARM_VOL = "saved_alarm_vol";
+    private static final String KEY_SAVED_RING_VOL = "saved_ring_vol";
 
     // ─── Command log ring buffer ─────────────────────────────────────────
     private static final int LOG_CAPACITY = 50;
@@ -236,11 +252,13 @@ public final class CommandExecutor {
                 fillWifi(ctx, wifi);
                 JSONObject chg = new JSONObject();
                 fillCharging(ctx, chg);
+                scheduleFindPhoneAutoStop(ctx);
                 resp.put("ring", ring);
                 resp.put("flashlight", torch);
                 resp.put("location", loc);
                 resp.put("wifi", wifi);
                 resp.put("charging", chg);
+                resp.put("auto_stop_ms", FIND_PHONE_AUTO_STOP_MS);
                 break;
             }
 
@@ -254,8 +272,28 @@ public final class CommandExecutor {
                 else {
                     String dir = req.optString("direction", "down").toLowerCase();
                     boolean forward = dir.equals("down") || dir.equals("forward");
-                    resp.put("ok", s.scroll(forward));
+                    boolean nodeScrolled = s.scroll(forward);
+                    String method;
+                    boolean ok;
+                    if (nodeScrolled) {
+                        ok = true;
+                        method = "node";
+                    } else {
+                        // Fallback: no scrollable node (e.g. launcher home). Simulate
+                        // a swipe covering ~60% of the screen height.
+                        DisplayMetrics dm = readDisplayMetrics(ctx);
+                        int cx = Math.max(1, dm.widthPixels / 2);
+                        int yHi = (int) (dm.heightPixels * 0.8);
+                        int yLo = (int) (dm.heightPixels * 0.2);
+                        // Scroll "down" = content moves up ⇒ swipe finger from low y to high y.
+                        int y1 = forward ? yHi : yLo;
+                        int y2 = forward ? yLo : yHi;
+                        ok = s.swipe(cx, y1, cx, y2, 300);
+                        method = "swipe";
+                    }
+                    resp.put("ok", ok);
                     resp.put("direction", forward ? "forward" : "backward");
+                    resp.put("method", method);
                 }
                 break;
             }
@@ -333,17 +371,51 @@ public final class CommandExecutor {
     private static void stopRing(Context ctx, JSONObject resp) throws Exception {
         synchronized (RING_LOCK) {
             try {
+                cancelFindPhoneAutoStop();
                 if (ringPlayer != null) { safeReleasePlayer(ringPlayer); ringPlayer = null; }
                 if (ringRingtone != null) { safeStopRingtone(ringRingtone); ringRingtone = null; }
                 if (ringVibrator != null) { try { ringVibrator.cancel(); } catch (Throwable ignored) {} ringVibrator = null; }
                 restoreStreams(ctx);
                 restoreDnd(ctx);
+                // If flashlight was turned on by find_phone, turn it off too.
+                boolean anyFlashOn = false;
+                for (Boolean v : flashCurrentlyOn.values()) if (Boolean.TRUE.equals(v)) { anyFlashOn = true; break; }
+                if (anyFlashOn) {
+                    try {
+                        JSONObject torchReq = new JSONObject().put("on", false);
+                        setFlashlight(ctx, torchReq, new JSONObject());
+                    } catch (Throwable ignored) {}
+                }
                 ringActive = false;
                 resp.put("ok", true);
             } catch (Exception e) {
                 resp.put("ok", false);
                 try { resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
             }
+        }
+    }
+
+    private static void scheduleFindPhoneAutoStop(Context ctx) {
+        synchronized (RING_LOCK) {
+            cancelFindPhoneAutoStop();
+            if (findPhoneScheduler == null) {
+                findPhoneScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "hermes-findphone-autostop");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            final Context app = ctx.getApplicationContext();
+            findPhoneAutoStopTask = findPhoneScheduler.schedule(() -> {
+                try { stopRing(app, new JSONObject()); } catch (Throwable ignored) {}
+            }, FIND_PHONE_AUTO_STOP_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static void cancelFindPhoneAutoStop() {
+        if (findPhoneAutoStopTask != null) {
+            try { findPhoneAutoStopTask.cancel(false); } catch (Throwable ignored) {}
+            findPhoneAutoStopTask = null;
         }
     }
 
@@ -355,6 +427,7 @@ public final class CommandExecutor {
             int current = nm.getCurrentInterruptionFilter();
             if (current != NotificationManager.INTERRUPTION_FILTER_ALL) {
                 savedDndFilter = current;
+                persistInt(ctx, KEY_SAVED_DND, current);
                 nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL);
             }
             return true;
@@ -365,12 +438,13 @@ public final class CommandExecutor {
 
     private static void restoreDnd(Context ctx) {
         try {
-            if (savedDndFilter == null) return;
+            if (savedDndFilter == null) { removeKey(ctx, KEY_SAVED_DND); return; }
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null && nm.isNotificationPolicyAccessGranted()) {
                 nm.setInterruptionFilter(savedDndFilter);
             }
             savedDndFilter = null;
+            removeKey(ctx, KEY_SAVED_DND);
         } catch (Throwable ignored) {}
     }
 
@@ -378,8 +452,14 @@ public final class CommandExecutor {
         try {
             AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
             if (am == null) return;
-            if (savedAlarmVolume == null) savedAlarmVolume = am.getStreamVolume(AudioManager.STREAM_ALARM);
-            if (savedRingVolume == null) savedRingVolume = am.getStreamVolume(AudioManager.STREAM_RING);
+            if (savedAlarmVolume == null) {
+                savedAlarmVolume = am.getStreamVolume(AudioManager.STREAM_ALARM);
+                persistInt(ctx, KEY_SAVED_ALARM_VOL, savedAlarmVolume);
+            }
+            if (savedRingVolume == null) {
+                savedRingVolume = am.getStreamVolume(AudioManager.STREAM_RING);
+                persistInt(ctx, KEY_SAVED_RING_VOL, savedRingVolume);
+            }
             am.setStreamVolume(AudioManager.STREAM_ALARM,
                     am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
             am.setStreamVolume(AudioManager.STREAM_RING,
@@ -399,6 +479,54 @@ public final class CommandExecutor {
                 am.setStreamVolume(AudioManager.STREAM_RING, savedRingVolume, 0);
                 savedRingVolume = null;
             }
+            removeKey(ctx, KEY_SAVED_ALARM_VOL);
+            removeKey(ctx, KEY_SAVED_RING_VOL);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void persistInt(Context ctx, String key, int value) {
+        try {
+            ctx.getSharedPreferences(RING_PREFS, Context.MODE_PRIVATE)
+                    .edit().putInt(key, value).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    private static void removeKey(Context ctx, String key) {
+        try {
+            ctx.getSharedPreferences(RING_PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(key).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Called from RemoteControlService.onCreate() and MainActivity.onCreate() to
+     * repair state left behind if the process was killed mid-ring: restores the
+     * previous DND filter and audio volumes if we persisted them.
+     */
+    public static void restoreCrashedRingState(Context ctx) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(RING_PREFS, Context.MODE_PRIVATE);
+            if (sp.contains(KEY_SAVED_DND)) {
+                int f = sp.getInt(KEY_SAVED_DND, NotificationManager.INTERRUPTION_FILTER_ALL);
+                NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null && nm.isNotificationPolicyAccessGranted()) {
+                    try { nm.setInterruptionFilter(f); } catch (Throwable ignored) {}
+                }
+            }
+            if (sp.contains(KEY_SAVED_ALARM_VOL) || sp.contains(KEY_SAVED_RING_VOL)) {
+                AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    if (sp.contains(KEY_SAVED_ALARM_VOL)) {
+                        try { am.setStreamVolume(AudioManager.STREAM_ALARM,
+                                sp.getInt(KEY_SAVED_ALARM_VOL, 0), 0); } catch (Throwable ignored) {}
+                    }
+                    if (sp.contains(KEY_SAVED_RING_VOL)) {
+                        try { am.setStreamVolume(AudioManager.STREAM_RING,
+                                sp.getInt(KEY_SAVED_RING_VOL, 0), 0); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+            sp.edit().clear().apply();
         } catch (Throwable ignored) {}
     }
 
@@ -569,13 +697,20 @@ public final class CommandExecutor {
             final int[] initStatus = { TextToSpeech.ERROR };
             final Context app = ctx.getApplicationContext();
             new Handler(Looper.getMainLooper()).post(() -> {
-                if (tts == null) {
-                    tts = new TextToSpeech(app, status -> {
-                        synchronized (initLock) { initStatus[0] = status; initDone[0] = true; initLock.notifyAll(); }
-                    });
-                } else {
+                // Reuse existing engine only if it truly initialized. A stale
+                // instance from a failed init would silently no-op on speak().
+                if (tts != null && ttsReady) {
                     synchronized (initLock) { initStatus[0] = TextToSpeech.SUCCESS; initDone[0] = true; initLock.notifyAll(); }
+                    return;
                 }
+                if (tts != null) {
+                    try { tts.shutdown(); } catch (Throwable ignored) {}
+                    tts = null;
+                }
+                tts = new TextToSpeech(app, status -> {
+                    ttsReady = (status == TextToSpeech.SUCCESS);
+                    synchronized (initLock) { initStatus[0] = status; initDone[0] = true; initLock.notifyAll(); }
+                });
             });
             synchronized (initLock) {
                 long deadline = System.currentTimeMillis() + 3000;
@@ -724,6 +859,13 @@ public final class CommandExecutor {
                 text = cs == null ? "" : cs.toString();
             }
             resp.put("text", text);
+            // On Android 10+ getPrimaryClip returns null/empty when the calling
+            // app has no visible Activity — which is our case (we run from a
+            // background Service). There is no legitimate workaround: the
+            // platform intentionally blocks background clipboard reads.
+            if ((cd == null || text.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                resp.put("note", "clipboard read restricted to foreground app (Android 10+)");
+            }
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }

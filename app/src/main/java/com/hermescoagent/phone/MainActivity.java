@@ -54,6 +54,11 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // If the previous process was killed mid-ring, DND + audio volumes may
+        // be stuck in the "ringing" state. Fix that as soon as the user opens
+        // the app (in addition to the service-startup cleanup).
+        CommandExecutor.restoreCrashedRingState(this);
+
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.parseColor("#0D1117"));
 
