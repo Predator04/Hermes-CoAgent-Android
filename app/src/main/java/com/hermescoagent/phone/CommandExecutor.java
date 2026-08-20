@@ -364,6 +364,25 @@ public final class CommandExecutor {
                 resp.put("log", snapshotLog());
                 break;
 
+            // ─── camera / theft-response / lock / open ─────────────────────
+            case "photo":
+                return PhotoCapture.capture(ctx, req.optString("camera", "front"));
+            case "stolen":
+                return stolen(ctx);
+            case "lock": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                    resp.put("ok", false); resp.put("error", "lock requires API 28+");
+                } else {
+                    resp.put("ok", s.lockScreen());
+                }
+                break;
+            }
+            case "open_url":
+                openUrl(ctx, req.optString("url"), resp);
+                break;
+
             default:
                 resp.put("ok", false);
                 resp.put("error", "unknown action: " + action);
@@ -988,6 +1007,52 @@ public final class CommandExecutor {
             resp.put("package", "");
             resp.put("node_count", -1);
             resp.put("accessibility", false);
+        }
+    }
+
+    // ────────────────────────────── stolen ───────────────────────────────
+
+    /**
+     * Stealth theft-response combo: front + back photo, GPS, wifi, charging,
+     * timestamp — all in one response, no visible/audible feedback.
+     */
+    private static JSONObject stolen(Context ctx) throws Exception {
+        JSONObject resp = new JSONObject();
+        resp.put("ok", true);
+        resp.put("timestamp", System.currentTimeMillis());
+        resp.put("front", PhotoCapture.capture(ctx, "front"));
+        resp.put("back", PhotoCapture.capture(ctx, "back"));
+        JSONObject loc = new JSONObject();
+        fillLocation(ctx, loc);
+        resp.put("location", loc);
+        JSONObject wifi = new JSONObject();
+        fillWifi(ctx, wifi);
+        resp.put("wifi", wifi);
+        JSONObject charging = new JSONObject();
+        fillCharging(ctx, charging);
+        resp.put("charging", charging);
+        return resp;
+    }
+
+    // ────────────────────────────── open_url ─────────────────────────────
+
+    private static void openUrl(Context ctx, String url, JSONObject resp) {
+        try {
+            if (url == null || url.isEmpty()) {
+                resp.put("ok", false); resp.put("error", "url required"); return;
+            }
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                ctx.startActivity(i);
+                resp.put("ok", true);
+                resp.put("url", url);
+            } catch (android.content.ActivityNotFoundException anf) {
+                resp.put("ok", false);
+                resp.put("error", "no handler for url");
+            }
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }
     }
 

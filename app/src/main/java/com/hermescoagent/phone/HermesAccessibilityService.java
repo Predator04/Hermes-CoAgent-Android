@@ -98,8 +98,15 @@ public class HermesAccessibilityService extends AccessibilityService {
             case "notifications": return performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS);
             case "quick_settings": return performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS);
             case "power": return performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
+            case "lock": return lockScreen();
             default: return false;
         }
+    }
+
+    /** Lock the screen via accessibility. Requires API 28+. */
+    public boolean lockScreen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false;
+        return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 
     public boolean type(String text) {
