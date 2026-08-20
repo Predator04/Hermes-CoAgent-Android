@@ -28,6 +28,11 @@ public final class AudioCapture {
         int secs = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, seconds));
         try {
             resp.put("seconds", secs);
+            if (!PermissionPrefs.wants(ctx, PermissionPrefs.MIC)) {
+                resp.put("ok", false);
+                resp.put("error", "microphone disabled by user");
+                return resp;
+            }
             if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 resp.put("ok", false);
                 resp.put("error", "record_audio permission not granted");

@@ -3,12 +3,10 @@ package com.hermescoagent.phone;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.ConnectivityManager;
@@ -20,12 +18,12 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.View;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -48,7 +46,9 @@ public class MainActivity extends Activity {
     private Switch remoteToggle;
     private Button grantAccessibility;
     private Button startServer;
-    private Button grantPerms;
+    private Button grantPermsButton;
+
+    private final List<PermSpec> permSpecs = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -249,10 +249,7 @@ public class MainActivity extends Activity {
             renderRemoteStatus(RemoteRelayClient.Status.OFF, "");
         }
 
-        grantPerms = new Button(this);
-        grantPerms.setText("Grant permissions (location / DND / camera / battery)");
-        grantPerms.setOnClickListener(v -> showPermissionsDialog());
-        root.addView(grantPerms);
+        initPermissionsSection(root);
 
         Switch privacyToggle = new Switch(this);
         privacyToggle.setText("  Privacy mode (block screenshot/dump/snapshot/notifications)");
@@ -313,150 +310,371 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         updateStatus();
 
-        requestRuntimePermissionsOnFirstUse();
-
         UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl) -> {
             if (available) showUpdateDialog(code, name1, apkUrl);
         });
     }
 
+    // ─────────────────────────── permissions UI ─────────────────────────
+
     private static final int REQ_RUNTIME_PERMS = 4711;
 
-    private void requestRuntimePermissionsOnFirstUse() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        List<String> need = new ArrayList<>();
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.CAMERA);
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.RECORD_AUDIO);
-        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.READ_PHONE_STATE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            need.add(Manifest.permission.POST_NOTIFICATIONS);
+    private interface IntentFactory { Intent create(); }
+
+    private final class PermSpec {
+        final String key;
+        final String label;
+        final String why;
+        final int minSdk;
+        final String[] runtimePerms;         // null → not a runtime perm
+        final String[] howToSteps;           // null → no numbered steps shown
+        final IntentFactory settingsIntent;  // null → no Open Settings button
+
+        CheckBox checkbox;
+        TextView statusText;
+        Button openSettings;
+
+        PermSpec(String key, String label, String why, int minSdk,
+                 String[] runtimePerms, String[] howToSteps, IntentFactory settingsIntent) {
+            this.key = key;
+            this.label = label;
+            this.why = why;
+            this.minSdk = minSdk;
+            this.runtimePerms = runtimePerms;
+            this.howToSteps = howToSteps;
+            this.settingsIntent = settingsIntent;
         }
-        // Background location must be requested separately AFTER fine/coarse are granted (Android 11+).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            need.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
-        }
-        if (!need.isEmpty()) {
-            requestPermissions(need.toArray(new String[0]), REQ_RUNTIME_PERMS);
+
+        boolean applicable() { return Build.VERSION.SDK_INT >= minSdk; }
+        boolean isRuntime()  { return runtimePerms != null; }
+        boolean isComplex()  { return settingsIntent != null; }
+
+        void refresh() {
+            if (!applicable()) {
+                checkbox.setChecked(false);
+                checkbox.setEnabled(false);
+                statusText.setText("Not needed on this Android version.");
+                statusText.setTextColor(Color.parseColor("#8B949E"));
+                if (openSettings != null) openSettings.setVisibility(View.GONE);
+                return;
+            }
+            boolean granted = PermissionPrefs.isGranted(MainActivity.this, key);
+            boolean wants = PermissionPrefs.wants(MainActivity.this, key);
+            checkbox.setEnabled(true);
+            checkbox.setChecked(wants);
+            if (granted) {
+                statusText.setText("Granted");
+                statusText.setTextColor(Color.parseColor("#7EE787"));
+            } else if (wants) {
+                statusText.setText(isRuntime() && !isComplex()
+                        ? "Not granted — tap Grant permissions"
+                        : "Not granted — tap Open Settings");
+                statusText.setTextColor(Color.parseColor("#F0B72F"));
+            } else {
+                statusText.setText("Off (feature disabled)");
+                statusText.setTextColor(Color.parseColor("#8B949E"));
+            }
+            if (openSettings != null) openSettings.setVisibility(View.VISIBLE);
         }
     }
 
-    private boolean allPermissionsGranted() {
-        boolean loc = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean mic = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        boolean phone = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
-        boolean bgLoc = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-                || checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        boolean dnd = nm != null && nm.isNotificationPolicyAccessGranted();
-        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        boolean batt = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
-        boolean notifListener = isNotificationListenerEnabled();
-        return loc && cam && mic && phone && bgLoc && notif && dnd && batt && notifListener;
+    private void initPermissionsSection(LinearLayout root) {
+        TextView header = new TextView(this);
+        header.setText("Permissions");
+        header.setTextSize(16);
+        header.setTextColor(Color.WHITE);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setPadding(0, 32, 0, 4);
+        root.addView(header);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Check the features you want. Tap ? for the reason. "
+                + "Permissions Android grants through Settings show an Open Settings button.");
+        subtitle.setTextSize(12);
+        subtitle.setTextColor(Color.parseColor("#8B949E"));
+        subtitle.setPadding(0, 0, 0, 12);
+        root.addView(subtitle);
+
+        grantPermsButton = new Button(this);
+        grantPermsButton.setText("Grant permissions");
+        grantPermsButton.setOnClickListener(v -> onGrantAllClicked());
+        root.addView(grantPermsButton);
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.LOC,
+                "Location (GPS)",
+                "To get the phone's position for the `location` command and the `stolen` anti-theft response.",
+                Build.VERSION_CODES.M,
+                new String[]{
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                },
+                null, null));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.BG_LOC,
+                "Background location",
+                "To log a route (GPS breadcrumbs) for `tracking`/`location_history`, even while the app is in the background.",
+                Build.VERSION_CODES.Q,
+                null,
+                new String[]{
+                        "1. Tap Open Settings",
+                        "2. Tap Permissions",
+                        "3. Tap Location",
+                        "4. Select 'Allow all the time'"
+                },
+                () -> {
+                    Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    return i;
+                }));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.CAM,
+                "Camera",
+                "To silently take front/back photos via `photo` and `stolen` so you can see who has the phone.",
+                Build.VERSION_CODES.M,
+                new String[]{Manifest.permission.CAMERA},
+                null, null));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.MIC,
+                "Microphone",
+                "To record ambient audio via `mic` so you can hear what's happening around the phone.",
+                Build.VERSION_CODES.M,
+                new String[]{Manifest.permission.RECORD_AUDIO},
+                null, null));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.PHONE,
+                "Phone state / SIM",
+                "To read the SIM identity via `sim`/`sim_events` and detect if a thief swaps the SIM card.",
+                Build.VERSION_CODES.M,
+                new String[]{Manifest.permission.READ_PHONE_STATE},
+                null, null));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.POST_NOTIF,
+                "Notifications",
+                "Required by Android to show the persistent 'remote control running' status-bar notification while the foreground service is active.",
+                Build.VERSION_CODES.TIRAMISU,
+                new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                null, null));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.DND,
+                "DND access",
+                "So the `ring` command can play sound even when the phone is on silent or Do Not Disturb.",
+                Build.VERSION_CODES.BASE,
+                null,
+                new String[]{
+                        "1. Tap Open Settings",
+                        "2. Find Hermes CoAgent in the list",
+                        "3. Toggle it ON"
+                },
+                () -> new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.NOTIF_LISTENER,
+                "Notification access",
+                "So you can read (`notifications`) and dismiss (`dismiss_notification`) the phone's notifications remotely.",
+                Build.VERSION_CODES.BASE,
+                null,
+                new String[]{
+                        "1. Tap Open Settings",
+                        "2. Find Hermes CoAgent",
+                        "3. Toggle it ON",
+                        "4. Tap Allow when prompted"
+                },
+                () -> new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+
+        addPermRow(root, new PermSpec(
+                PermissionPrefs.BATT,
+                "Battery exemption",
+                "So Android doesn't kill the background service and cut off remote control.",
+                Build.VERSION_CODES.M,
+                null,
+                new String[]{
+                        "1. Tap Open Settings",
+                        "2. Select 'Allow' (or 'Don't optimize')"
+                },
+                this::batteryExemptionIntent));
     }
 
-    private boolean isNotificationListenerEnabled() {
-        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        if (flat == null || flat.isEmpty()) return false;
-        String needle = getPackageName() + "/" + HermesNotificationListener.class.getName();
-        for (String entry : flat.split(":")) {
-            if (entry.equals(needle)) return true;
+    private void addPermRow(LinearLayout root, PermSpec spec) {
+        permSpecs.add(spec);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(16, 16, 16, 16);
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardLp.setMargins(0, 12, 0, 0);
+        card.setLayoutParams(cardLp);
+        card.setBackgroundColor(Color.parseColor("#161B22"));
+
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        spec.checkbox = new CheckBox(this);
+        spec.checkbox.setText(spec.label);
+        spec.checkbox.setTextColor(Color.WHITE);
+        spec.checkbox.setTextSize(15);
+        LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        spec.checkbox.setLayoutParams(cbLp);
+        spec.checkbox.setOnCheckedChangeListener((btn, checked) -> {
+            if (!spec.applicable()) return;
+            PermissionPrefs.setWants(MainActivity.this, spec.key, checked);
+            refreshPermissions();
+        });
+        headerRow.addView(spec.checkbox);
+
+        Button whyBtn = new Button(this);
+        whyBtn.setText("?");
+        whyBtn.setMinWidth(0);
+        whyBtn.setMinimumWidth(0);
+        whyBtn.setPadding(24, 0, 24, 0);
+        whyBtn.setOnClickListener(v -> showWhyDialog(spec));
+        headerRow.addView(whyBtn);
+
+        card.addView(headerRow);
+
+        spec.statusText = new TextView(this);
+        spec.statusText.setTextSize(12);
+        spec.statusText.setPadding(0, 4, 0, 4);
+        card.addView(spec.statusText);
+
+        if (spec.howToSteps != null) {
+            TextView steps = new TextView(this);
+            StringBuilder sb = new StringBuilder("How to enable:\n");
+            for (int i = 0; i < spec.howToSteps.length; i++) {
+                sb.append(spec.howToSteps[i]);
+                if (i < spec.howToSteps.length - 1) sb.append('\n');
+            }
+            steps.setText(sb.toString());
+            steps.setTextSize(12);
+            steps.setTextColor(Color.parseColor("#C9D1D9"));
+            steps.setPadding(0, 4, 0, 4);
+            card.addView(steps);
         }
-        return false;
+
+        if (spec.settingsIntent != null) {
+            spec.openSettings = new Button(this);
+            spec.openSettings.setText("Open Settings");
+            spec.openSettings.setOnClickListener(v -> openSettingsFor(spec));
+            card.addView(spec.openSettings);
+        }
+
+        root.addView(card);
     }
 
-    private void showPermissionsDialog() {
-        boolean loc = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        boolean cam = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean mic = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        boolean phone = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
-        boolean bgLoc = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-                || checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        boolean notif = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
-        boolean dnd = false;
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) dnd = nm.isNotificationPolicyAccessGranted();
-        boolean battOpt = false;
-        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            battOpt = pm.isIgnoringBatteryOptimizations(getPackageName());
-        }
-
-        boolean notifListener = isNotificationListenerEnabled();
-        String msg = "• Location (GPS): " + mark(loc) + "\n" +
-                "• Background location (tracking): " + mark(bgLoc) + "\n" +
-                "• Camera (flashlight/photo): " + mark(cam) + "\n" +
-                "• Microphone (ambient audio): " + mark(mic) + "\n" +
-                "• Phone state (SIM info): " + mark(phone) + "\n" +
-                "• Notifications (Android 13+): " + mark(notif) + "\n" +
-                "• Notification Policy (DND bypass for ring): " + mark(dnd) + "\n" +
-                "• Notification access (read/dismiss): " + mark(notifListener) + "\n" +
-                "• Battery optimization exempt (keep alive): " + mark(battOpt);
-
+    private void showWhyDialog(PermSpec spec) {
+        boolean granted = PermissionPrefs.isGranted(this, spec.key);
         AlertDialog.Builder b = new AlertDialog.Builder(this)
-                .setTitle("Permissions")
-                .setMessage(msg)
-                .setNegativeButton("Close", (d, w) -> d.dismiss());
-        if (!loc || !cam || !mic || !phone || !bgLoc || !notif) {
-            b.setPositiveButton("Request runtime", (d, w) -> requestRuntimePermissionsOnFirstUse());
-        }
-        if (!dnd) {
-            b.setNeutralButton("DND access", (d, w) -> {
+                .setTitle(spec.label)
+                .setMessage(spec.why)
+                .setPositiveButton("OK", (d, w) -> d.dismiss());
+        // Only runtime perms can be revoked via the app-details Settings page.
+        if (granted && spec.isRuntime() && !spec.isComplex()) {
+            b.setNeutralButton("Revoke in Settings", (d, w) -> {
                 try {
-                    startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
+                    Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
                 } catch (Exception e) {
-                    Toast.makeText(this, "Cannot open DND settings", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Cannot open app settings", Toast.LENGTH_SHORT).show();
                 }
             });
-        } else if (!notifListener) {
-            b.setNeutralButton("Notification access", (d, w) -> openNotificationListenerSettings());
-        } else if (!battOpt && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            b.setNeutralButton("Battery exempt", (d, w) -> requestBatteryExempt());
         }
         b.show();
     }
 
-    private void openNotificationListenerSettings() {
+    private void openSettingsFor(PermSpec spec) {
+        if (spec.settingsIntent == null) return;
         try {
-            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+            startActivity(spec.settingsIntent.create());
         } catch (Exception e) {
-            Toast.makeText(this, "Cannot open notification-access settings", Toast.LENGTH_SHORT).show();
+            // Battery-optimization fallback: some OEMs reject the per-package
+            // ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS intent — retry via
+            // the generic list settings.
+            if (PermissionPrefs.BATT.equals(spec.key)) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                    return;
+                } catch (Exception ignored) {}
+            }
+            Toast.makeText(this, "Cannot open settings for " + spec.label,
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void requestBatteryExempt() {
-        try {
-            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-            i.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(i);
-        } catch (Exception e) {
-            Toast.makeText(this, "Cannot open battery settings", Toast.LENGTH_SHORT).show();
+    private Intent batteryExemptionIntent() {
+        Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+        i.setData(Uri.parse("package:" + getPackageName()));
+        return i;
+    }
+
+    private void onGrantAllClicked() {
+        // 1) Batch runtime requests for anything the user wants and hasn't granted.
+        //    Background location is never bundled here: Android 11+ silently
+        //    drops it when combined with fine location.
+        List<String> runtimeToRequest = new ArrayList<>();
+        for (PermSpec s : permSpecs) {
+            if (!s.applicable()) continue;
+            if (!PermissionPrefs.wants(this, s.key)) continue;
+            if (PermissionPrefs.isGranted(this, s.key)) continue;
+            if (!s.isRuntime() || s.isComplex()) continue;
+            for (String p : s.runtimePerms) {
+                if (checkSelfPermission(p) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    runtimeToRequest.add(p);
+                }
+            }
+        }
+        if (!runtimeToRequest.isEmpty()) {
+            requestPermissions(runtimeToRequest.toArray(new String[0]), REQ_RUNTIME_PERMS);
+            return;
+        }
+
+        // 2) Nothing runtime pending — open the first pending Settings deep-link.
+        for (PermSpec s : permSpecs) {
+            if (!s.applicable()) continue;
+            if (!PermissionPrefs.wants(this, s.key)) continue;
+            if (PermissionPrefs.isGranted(this, s.key)) continue;
+            if (s.settingsIntent != null) {
+                openSettingsFor(s);
+                return;
+            }
+        }
+        // 3) Everything checked is granted (shouldn't happen — button would be hidden).
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_RUNTIME_PERMS) {
+            refreshPermissions();
         }
     }
 
-    private static String mark(boolean ok) { return ok ? "granted" : "NOT granted"; }
+    private void refreshPermissions() {
+        boolean anyPending = false;
+        for (PermSpec s : permSpecs) {
+            s.refresh();
+            if (s.applicable()
+                    && PermissionPrefs.wants(this, s.key)
+                    && !PermissionPrefs.isGranted(this, s.key)) {
+                anyPending = true;
+            }
+        }
+        if (grantPermsButton != null) {
+            grantPermsButton.setVisibility(anyPending ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    // ─────────────────────────── remote status ──────────────────────────
 
     private void showUpdateDialog(int latestCode, String releaseName, String apkUrl) {
         if (isFinishing()) return;
@@ -522,9 +740,7 @@ public class MainActivity extends Activity {
                     : "2. Start Remote Control");
             startServer.setEnabled(!running);
         }
-        if (grantPerms != null) {
-            grantPerms.setVisibility(allPermissionsGranted() ? View.GONE : View.VISIBLE);
-        }
+        refreshPermissions();
     }
 
     /**

@@ -53,6 +53,11 @@ public final class PhotoCapture {
         String cam = "back".equalsIgnoreCase(facing) ? "back" : "front";
         try {
             resp.put("camera", cam);
+            if (!PermissionPrefs.wants(ctx, PermissionPrefs.CAM)) {
+                resp.put("ok", false);
+                resp.put("error", "camera disabled by user");
+                return resp;
+            }
             if (ctx.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 resp.put("ok", false);
                 resp.put("error", "camera permission not granted");

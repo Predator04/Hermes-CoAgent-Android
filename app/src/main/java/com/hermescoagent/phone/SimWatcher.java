@@ -118,6 +118,9 @@ public final class SimWatcher {
         // without READ_PRIVILEGED_PHONE_STATE for most callers. We attempt it
         // guarded by the runtime permission check; return "" on failure.
         try {
+            if (!PermissionPrefs.wants(ctx, PermissionPrefs.PHONE)) {
+                return "";
+            }
             if (ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
                 return "";
             }

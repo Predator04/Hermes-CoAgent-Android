@@ -100,6 +100,13 @@ public final class LocationTracker {
     }
 
     private static void pollAndStore(Context ctx) {
+        // Background GPS breadcrumbs need BG_LOC on Android 10+; both toggles
+        // (LOC and BG_LOC) must be checked by the user for the tracker to run.
+        if (!PermissionPrefs.wants(ctx, PermissionPrefs.LOC)) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && !PermissionPrefs.wants(ctx, PermissionPrefs.BG_LOC)) {
+            return;
+        }
         if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                 && ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;

@@ -535,6 +535,7 @@ public final class CommandExecutor {
 
     private static boolean tryBypassDnd(Context ctx) {
         try {
+            if (!PermissionPrefs.wants(ctx, PermissionPrefs.DND)) return false;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return false;
             if (!nm.isNotificationPolicyAccessGranted()) return false;
@@ -677,6 +678,11 @@ public final class CommandExecutor {
 
     private static void fillLocation(Context ctx, JSONObject resp) {
         try {
+            if (!PermissionPrefs.wants(ctx, PermissionPrefs.LOC)) {
+                resp.put("ok", false);
+                resp.put("error", "location disabled by user");
+                return;
+            }
             if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                     && ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 resp.put("ok", false);
