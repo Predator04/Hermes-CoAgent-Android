@@ -187,13 +187,18 @@ public final class RemoteRelayClient {
         JSONObject body = new JSONObject();
         body.put("device_id", deviceId);
         body.put("token", token);
-        httpJson("POST", base + "/register", body.toString(), SHORT_TIMEOUT_MS);
+        // Send X-Hermes-Token so the relay accepts a token-rotate on an
+        // existing device_id (proof of ownership). Fresh registrations ignore it.
+        httpJson("POST", base + "/register", body.toString(), SHORT_TIMEOUT_MS, token);
     }
 
     private JSONArray poll(String base, String deviceId, String token) {
         try {
-            String url = base + "/poll?device_id=" + enc(deviceId) + "&token=" + enc(token);
-            String resp = httpJson("GET", url, null, POLL_READ_TIMEOUT_MS);
+            // Token is sent as X-Hermes-Token header — never as a query param.
+            // URLs get logged (relay stderr, ngrok inspector, LB access logs)
+            // so keeping the token out of the URL prevents token disclosure.
+            String url = base + "/poll?device_id=" + enc(deviceId);
+            String resp = httpJson("GET", url, null, POLL_READ_TIMEOUT_MS, token);
             if (resp == null) return new JSONArray();
             JSONObject o = new JSONObject(resp);
             JSONArray a = o.optJSONArray("commands");
@@ -216,7 +221,7 @@ public final class RemoteRelayClient {
         } catch (Exception parse) {
             body.put("result", resultJson);
         }
-        httpJson("POST", base + "/result", body.toString(), SHORT_TIMEOUT_MS);
+        httpJson("POST", base + "/result", body.toString(), SHORT_TIMEOUT_MS, null);
     }
 
     private static String enc(String s) {
@@ -225,12 +230,20 @@ public final class RemoteRelayClient {
     }
 
     private static String httpJson(String method, String urlStr, String body, int readTimeoutMs) throws Exception {
+        return httpJson(method, urlStr, body, readTimeoutMs, null);
+    }
+
+    private static String httpJson(String method, String urlStr, String body, int readTimeoutMs,
+                                   String hermesToken) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
         try {
             c.setRequestMethod(method);
             c.setConnectTimeout(10_000);
             c.setReadTimeout(readTimeoutMs);
             c.setRequestProperty("Accept", "application/json");
+            if (hermesToken != null && !hermesToken.isEmpty()) {
+                c.setRequestProperty("X-Hermes-Token", hermesToken);
+            }
             if (body != null) {
                 c.setDoOutput(true);
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");

@@ -434,6 +434,15 @@ public class HermesAccessibilityService extends AccessibilityService {
             File dir = new File(getCacheDir(), "screenshots");
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
+            // Purge stale JPEGs so screenshots don't accumulate indefinitely
+            // in app-private cache (potential exposure via backup or root).
+            File[] existing = dir.listFiles();
+            if (existing != null) {
+                for (File f : existing) {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
             File out = new File(dir, "screenshot-" + System.currentTimeMillis() + ".jpg");
             try (FileOutputStream fos = new FileOutputStream(out)) {
                 fos.write(jpeg);

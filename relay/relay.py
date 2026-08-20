@@ -9,14 +9,18 @@ connections; the phone never needs an inbound port through carrier NAT.
 Endpoints:
   POST /register  {"device_id","token"}                       -> {"ok":true}
   POST /command   {"device_id","token","action":{...}}        -> {"ok":true,"command_id":"..."}
-  GET  /poll?device_id=..&token=..   (long-poll, up to 25s)   -> {"commands":[{command_id, action}, ...]}
+  GET  /poll?device_id=..    (long-poll, up to 25s)           -> {"commands":[{command_id, action}, ...]}
   POST /result    {"device_id","token","command_id","result"} -> {"ok":true}
-  GET  /result?command_id=..&token=..[&device_id=..]          -> {"status":"done","result":..} or {"status":"pending"}
-  GET  /devices?token=..                                      -> {"ok":true,"devices":[...]}
+  GET  /result?command_id=..[&device_id=..]                   -> {"status":"done","result":..} or {"status":"pending"}
+  GET  /devices                                               -> {"ok":true,"devices":[...]}
 
-Auth: GET /result and /devices require `token` — either the registered token
-of the owning device, or the optional controller token in the env var
-HERMES_CONTROLLER_TOKEN.
+Auth: tokens for GET requests should be passed via the `X-Hermes-Token`
+header. A legacy `?token=` query param is still accepted but discouraged
+(URLs land in access logs / proxies). GET /result and /devices require
+`token` — either the registered token of the owning device, or the
+optional controller token in the env var HERMES_CONTROLLER_TOKEN.
+GET /devices requires HERMES_CONTROLLER_TOKEN when it is set; when it is
+unset, any registered device token is accepted (single-device dev mode).
 
 In-memory only. Restart wipes state. Stdlib only.
 """
@@ -34,6 +38,8 @@ POLL_TIMEOUT_SEC = 25
 POLL_TICK_SEC = 0.25
 MAX_BODY_BYTES = 512 * 1024
 RESULT_TTL_SEC = 300
+MAX_QUEUE_LEN = 200          # cap pending commands per device (queue-flood guard)
+MAX_DEVICES = 1000           # cap distinct registered device_ids (memory guard)
 
 # Optional out-of-band controller token, set via env. When present, callers
 # may pass ?token=<CONTROLLER_TOKEN> to authenticate to GET /result and
@@ -86,11 +92,41 @@ def _controller_auth_ok_locked(token, device_id=None):
     return False
 
 
+def _strip_token_from_url(s):
+    """Remove `token=...` from a URL/log line so tokens never land on disk."""
+    if not s or "token=" not in s:
+        return s
+    out = []
+    for part in s.split():
+        if "token=" in part:
+            # Split on ? and & so we can rebuild without any token= pair.
+            base, _, query = part.partition("?")
+            if not query:
+                # token= might appear in a bare query fragment (rare)
+                keep = "&".join(seg for seg in part.split("&")
+                                if not seg.startswith("token="))
+                out.append(keep)
+                continue
+            pairs = [seg for seg in query.split("&") if not seg.startswith("token=")]
+            rebuilt = base + ("?" + "&".join(pairs) if pairs else "")
+            out.append(rebuilt)
+        else:
+            out.append(part)
+    return " ".join(out)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "HermesRelay/1.0"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("[relay] %s - %s\n" % (self.address_string(), fmt % args))
+        msg = fmt % args
+        sys.stderr.write("[relay] %s - %s\n" % (self.address_string(),
+                                                _strip_token_from_url(msg)))
+
+    def _header_token(self):
+        """Prefer the X-Hermes-Token header over any ?token= query param."""
+        h = self.headers.get("X-Hermes-Token")
+        return h.strip() if h else None
 
     def _read_body(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -126,6 +162,16 @@ class Handler(BaseHTTPRequestHandler):
             if not device_id or not token:
                 return self._send_json(400, {"ok": False, "error": "device_id and token required"})
             with _lock:
+                existing = _tokens.get(device_id)
+                if existing is not None and existing != token:
+                    # Someone else already claimed this device_id. Allow rotation
+                    # only if the caller proves knowledge of the previous token
+                    # (X-Hermes-Token header) or holds the controller token.
+                    proof = self._header_token()
+                    if proof != existing and not (_CONTROLLER_TOKEN and proof == _CONTROLLER_TOKEN):
+                        return self._send_json(409, {"ok": False, "error": "device_id already registered"})
+                if existing is None and len(_tokens) >= MAX_DEVICES:
+                    return self._send_json(429, {"ok": False, "error": "device registry full"})
                 _tokens[device_id] = token
                 _queues.setdefault(device_id, [])
                 _event_for(device_id)
@@ -140,8 +186,11 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 if not _auth_ok(device_id, token):
                     return self._send_json(401, {"ok": False, "error": "unknown device or bad token"})
+                q = _queues.setdefault(device_id, [])
+                if len(q) >= MAX_QUEUE_LEN:
+                    return self._send_json(429, {"ok": False, "error": "device queue full"})
                 cid = uuid.uuid4().hex
-                _queues.setdefault(device_id, []).append({"command_id": cid, "action": action})
+                q.append({"command_id": cid, "action": action})
                 ev = _event_for(device_id)
             ev.set()
             return self._send_json(200, {"ok": True, "command_id": cid})
@@ -171,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/poll":
             device_id = qs.get("device_id")
-            token = qs.get("token")
+            token = self._header_token() or qs.get("token")
             if not device_id or not token:
                 return self._send_json(400, {"ok": False, "error": "device_id and token required"})
             with _lock:
@@ -200,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/result":
             command_id = qs.get("command_id")
-            token = qs.get("token")
+            token = self._header_token() or qs.get("token")
             device_id = qs.get("device_id")
             if not command_id:
                 return self._send_json(400, {"ok": False, "error": "command_id required"})
@@ -221,11 +270,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, {"status": "done", "result": r["result"]})
 
         if path == "/devices":
-            token = qs.get("token")
+            token = self._header_token() or qs.get("token")
             if not token:
                 return self._send_json(401, {"ok": False, "error": "token required"})
             with _lock:
-                if not _controller_auth_ok_locked(token):
+                # When HERMES_CONTROLLER_TOKEN is configured, ONLY it may list
+                # devices — a compromised device token must not enumerate peers.
+                if _CONTROLLER_TOKEN:
+                    if token != _CONTROLLER_TOKEN:
+                        return self._send_json(401, {"ok": False, "error": "bad token"})
+                elif not _controller_auth_ok_locked(token):
                     return self._send_json(401, {"ok": False, "error": "bad token"})
                 ids = list(_tokens.keys())
             return self._send_json(200, {"ok": True, "devices": ids})
