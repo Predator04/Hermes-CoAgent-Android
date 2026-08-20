@@ -2,11 +2,18 @@ package com.hermescoagent.phone;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.ColorSpace;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.hardware.HardwareBuffer;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -14,9 +21,15 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Accessibility service — the input-injection core for remote control.
@@ -261,5 +274,164 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (text.contains(lowerQuery)) return true;
         String desc = node.optString("desc", "").toLowerCase(Locale.ROOT);
         return desc.contains(lowerQuery);
+    }
+
+    /** Package name of the app in the active window, or "" if unknown. */
+    public String getForegroundPackage() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return "";
+            CharSequence pkg = root.getPackageName();
+            return pkg == null ? "" : pkg.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    // Screenshot rate limit is ~1/sec on many OEM ROMs, but the callback usually
+    // completes within a few hundred ms. 5s covers cold-start jank.
+    private static final long SCREENSHOT_TIMEOUT_MS = 5000L;
+    private static final float DEFAULT_SCREENSHOT_SCALE = 0.5f;
+    private static final int DEFAULT_JPEG_QUALITY = 70;
+
+    /**
+     * Capture the current screen using AccessibilityService.takeScreenshot (API 30+).
+     * Saves a JPEG to the app cache dir and returns { ok, path, width, height,
+     * orig_width, orig_height, bytes, base64 (optional) }.
+     *
+     * Options in {@code opts}:
+     *   scale         (double, default 0.5)  — resize factor before compression
+     *   quality       (int,    default 70)   — JPEG quality 1..100
+     *   include_base64(boolean,default true) — embed base64 JPEG in the response
+     */
+    public JSONObject takeScreenshotToJson(JSONObject opts) throws JSONException {
+        JSONObject resp = new JSONObject();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            resp.put("ok", false);
+            resp.put("error", "screenshot requires API 30+");
+            return resp;
+        }
+
+        final float scale = clampScale((float) opts.optDouble("scale", DEFAULT_SCREENSHOT_SCALE));
+        final int quality = Math.max(1, Math.min(100, opts.optInt("quality", DEFAULT_JPEG_QUALITY)));
+        final boolean includeBase64 = opts.optBoolean("include_base64", true);
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<Bitmap> bitmapRef = new AtomicReference<>();
+        final AtomicInteger errRef = new AtomicInteger(0);
+        final AtomicReference<String> errMsgRef = new AtomicReference<>("");
+
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY,
+                    Executors.newSingleThreadExecutor(),
+                    new TakeScreenshotCallback() {
+                        @Override
+                        public void onSuccess(ScreenshotResult result) {
+                            HardwareBuffer hb = null;
+                            Bitmap wrapped = null;
+                            try {
+                                hb = result.getHardwareBuffer();
+                                ColorSpace cs = result.getColorSpace();
+                                wrapped = Bitmap.wrapHardwareBuffer(hb, cs);
+                                if (wrapped == null) {
+                                    errMsgRef.set("wrapHardwareBuffer returned null");
+                                    errRef.set(-2);
+                                } else {
+                                    // Copy to a software bitmap so we can compress.
+                                    bitmapRef.set(wrapped.copy(Bitmap.Config.ARGB_8888, false));
+                                }
+                            } catch (Throwable t) {
+                                errMsgRef.set(String.valueOf(t));
+                                errRef.set(-2);
+                            } finally {
+                                if (wrapped != null) wrapped.recycle();
+                                if (hb != null) hb.close();
+                                latch.countDown();
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(int errorCode) {
+                            errRef.set(errorCode);
+                            errMsgRef.set("takeScreenshot error " + errorCode);
+                            latch.countDown();
+                        }
+                    });
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", "takeScreenshot threw: " + t);
+            return resp;
+        }
+
+        try {
+            if (!latch.await(SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                resp.put("ok", false);
+                resp.put("error", "screenshot timeout");
+                return resp;
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            resp.put("ok", false);
+            resp.put("error", "interrupted");
+            return resp;
+        }
+
+        Bitmap bmp = bitmapRef.get();
+        if (bmp == null) {
+            resp.put("ok", false);
+            resp.put("error", errMsgRef.get().isEmpty() ? "no bitmap" : errMsgRef.get());
+            return resp;
+        }
+
+        int origW = bmp.getWidth();
+        int origH = bmp.getHeight();
+
+        Bitmap toEncode = bmp;
+        if (scale > 0f && scale < 0.999f) {
+            int sw = Math.max(1, Math.round(origW * scale));
+            int sh = Math.max(1, Math.round(origH * scale));
+            toEncode = Bitmap.createScaledBitmap(bmp, sw, sh, true);
+        }
+
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(64 * 1024);
+            toEncode.compress(Bitmap.CompressFormat.JPEG, quality, baos);
+            byte[] jpeg = baos.toByteArray();
+
+            File dir = new File(getCacheDir(), "screenshots");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            File out = new File(dir, "screenshot-" + System.currentTimeMillis() + ".jpg");
+            try (FileOutputStream fos = new FileOutputStream(out)) {
+                fos.write(jpeg);
+            }
+
+            resp.put("ok", true);
+            resp.put("path", out.getAbsolutePath());
+            resp.put("width", toEncode.getWidth());
+            resp.put("height", toEncode.getHeight());
+            resp.put("orig_width", origW);
+            resp.put("orig_height", origH);
+            resp.put("format", "jpeg");
+            resp.put("quality", quality);
+            resp.put("scale", scale);
+            resp.put("bytes", jpeg.length);
+            if (includeBase64) {
+                resp.put("base64", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+            }
+        } catch (Exception e) {
+            resp.put("ok", false);
+            resp.put("error", "encode/save failed: " + e);
+        } finally {
+            if (toEncode != bmp) toEncode.recycle();
+            bmp.recycle();
+        }
+        return resp;
+    }
+
+    private static float clampScale(float s) {
+        if (Float.isNaN(s) || s <= 0f) return DEFAULT_SCREENSHOT_SCALE;
+        if (s > 1f) return 1f;
+        return s;
     }
 }

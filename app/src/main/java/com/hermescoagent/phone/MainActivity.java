@@ -35,6 +35,7 @@ public class MainActivity extends Activity {
 
     private TextView statusView;
     private TextView tokenView;
+    private TextView deviceIdView;
     private TextView remoteStatusView;
     private EditText relayUrlField;
     private Switch remoteToggle;
@@ -101,6 +102,36 @@ public class MainActivity extends Activity {
             }
         });
         root.addView(copyToken);
+
+        TextView deviceIdLabel = new TextView(this);
+        deviceIdLabel.setText("Relay device_id (required by relay /command):");
+        deviceIdLabel.setTextSize(12);
+        deviceIdLabel.setTextColor(Color.parseColor("#8B949E"));
+        deviceIdLabel.setPadding(0, 16, 0, 4);
+        root.addView(deviceIdLabel);
+
+        deviceIdView = new TextView(this);
+        deviceIdView.setTextSize(12);
+        deviceIdView.setTextColor(Color.parseColor("#7EE787"));
+        deviceIdView.setTypeface(Typeface.MONOSPACE);
+        deviceIdView.setPadding(16, 12, 16, 12);
+        deviceIdView.setBackgroundColor(Color.parseColor("#161B22"));
+        deviceIdView.setGravity(Gravity.START);
+        deviceIdView.setTextIsSelectable(true);
+        deviceIdView.setText(RemoteRelayClient.ensureDeviceId(this));
+        root.addView(deviceIdView);
+
+        Button copyDeviceId = new Button(this);
+        copyDeviceId.setText("Copy device_id to clipboard");
+        copyDeviceId.setOnClickListener(v -> {
+            String id = RemoteRelayClient.ensureDeviceId(MainActivity.this);
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("Hermes device_id", id));
+                Toast.makeText(MainActivity.this, "device_id copied", Toast.LENGTH_SHORT).show();
+            }
+        });
+        root.addView(copyDeviceId);
 
         grantAccessibility = new Button(this);
         grantAccessibility.setText("1. Enable Accessibility (required)");

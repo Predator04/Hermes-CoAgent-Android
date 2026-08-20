@@ -100,8 +100,18 @@ public final class CommandExecutor {
                     else {
                         JSONArray nodes = s.dumpNodes();
                         if (nodes == null) { resp.put("ok", false); resp.put("error", "dump timeout"); }
-                        else { resp.put("nodes", nodes); resp.put("count", nodes.length()); }
+                        else {
+                            resp.put("nodes", nodes);
+                            resp.put("count", nodes.length());
+                            resp.put("package", s.getForegroundPackage());
+                        }
                     }
+                    break;
+                }
+                case "screenshot": {
+                    HermesAccessibilityService s = HermesAccessibilityService.instance;
+                    if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                    else return s.takeScreenshotToJson(req).toString();
                     break;
                 }
                 case "find": {
