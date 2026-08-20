@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, urlparse
 
 POLL_TIMEOUT_SEC = 25
 POLL_TICK_SEC = 0.25
-MAX_BODY_BYTES = 512 * 1024
+MAX_BODY_BYTES = 8 * 1024 * 1024   # 8 MB — photo/audio base64 results (4MP JPEG ≈ 2–3 MB base64)
 RESULT_TTL_SEC = 300
 MAX_QUEUE_LEN = 200          # cap pending commands per device (queue-flood guard)
 MAX_DEVICES = 1000           # cap distinct registered device_ids (memory guard)
