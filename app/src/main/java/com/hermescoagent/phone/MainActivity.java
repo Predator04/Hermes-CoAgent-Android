@@ -157,6 +157,7 @@ public class MainActivity extends Activity {
                 } else {
                     startService(i);
                 }
+                RemoteControlService.isRunning = true; // immediate UI feedback (startForegroundService is async)
                 Toast.makeText(this, "Remote control started on port " + RemoteControlService.PORT,
                         Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
