@@ -45,6 +45,8 @@ public class RemoteControlService extends Service {
     private ExecutorService workers;
     private volatile boolean running;
     private String authToken;
+    /** True while the foreground service + HTTP server are up (for UI status). */
+    public static volatile boolean isRunning = false;
 
     @Override
     public void onCreate() {
@@ -56,6 +58,7 @@ public class RemoteControlService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         startForeground();
         startServer();
+        isRunning = true;
         return START_STICKY;
     }
 
@@ -237,6 +240,7 @@ public class RemoteControlService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        isRunning = false;
         try { if (server != null) server.close(); } catch (Exception ignored) {}
         server = null;
         if (workers != null) {

@@ -18,6 +18,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
+import android.view.View;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -37,6 +38,8 @@ public class MainActivity extends Activity {
     private TextView remoteStatusView;
     private EditText relayUrlField;
     private Switch remoteToggle;
+    private Button grantAccessibility;
+    private Button startServer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -99,20 +102,26 @@ public class MainActivity extends Activity {
         });
         root.addView(copyToken);
 
-        Button grantAccessibility = new Button(this);
+        grantAccessibility = new Button(this);
         grantAccessibility.setText("1. Enable Accessibility (required)");
         grantAccessibility.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         root.addView(grantAccessibility);
 
-        Button startServer = new Button(this);
+        startServer = new Button(this);
         startServer.setText("2. Start Remote Control");
         startServer.setOnClickListener(v -> {
             Intent i = new Intent(this, RemoteControlService.class);
-            if (Build.VERSION.SDK_INT >= 26) {
-                startForegroundService(i);
-            } else {
-                startService(i);
+            try {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    startForegroundService(i);
+                } else {
+                    startService(i);
+                }
+                Toast.makeText(this, "Remote control started on port " + RemoteControlService.PORT,
+                        Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Failed to start: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
             updateStatus();
         });
@@ -145,6 +154,8 @@ public class MainActivity extends Activity {
         relayUrlField = new EditText(this);
         relayUrlField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         relayUrlField.setSingleLine(true);
+        relayUrlField.setTextSize(12);
+        relayUrlField.setEllipsize(android.text.TextUtils.TruncateAt.END);
         relayUrlField.setTextColor(Color.WHITE);
         relayUrlField.setHintTextColor(Color.parseColor("#6E7681"));
         relayUrlField.setHint("https://…");
@@ -285,6 +296,16 @@ public class MainActivity extends Activity {
         statusView.setText("IP: " + ip + "\nPort: " + RemoteControlService.PORT +
                 "\nAccessibility: " + (acc ? "ENABLED" : "NOT ENABLED"));
         tokenView.setText(RemoteControlService.ensureToken(this));
+        if (grantAccessibility != null) {
+            grantAccessibility.setVisibility(acc ? View.GONE : View.VISIBLE);
+        }
+        if (startServer != null) {
+            boolean running = RemoteControlService.isRunning;
+            startServer.setText(running
+                    ? "Running: remote control on :" + RemoteControlService.PORT
+                    : "2. Start Remote Control");
+            startServer.setEnabled(!running);
+        }
     }
 
     /**
