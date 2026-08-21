@@ -40,6 +40,7 @@ MAX_BODY_BYTES = 8 * 1024 * 1024   # 8 MB — photo/audio base64 results (4MP JP
 RESULT_TTL_SEC = 300
 MAX_QUEUE_LEN = 200          # cap pending commands per device (queue-flood guard)
 MAX_DEVICES = 1000           # cap distinct registered device_ids (memory guard)
+MAX_FRAMES_PER_DEVICE = 200  # cap buffered watch-mode frames per device (drop oldest)
 
 # Optional out-of-band controller token, set via env. When present, callers
 # may pass ?token=<CONTROLLER_TOKEN> to authenticate to GET /result and
@@ -52,6 +53,7 @@ _result_owner = {}    # command_id -> device_id (who submitted the result)
 _queues = {}          # device_id -> [ {command_id, action}, ... ]
 _results = {}         # command_id -> {"result": obj, "ts": epoch}
 _events = {}          # device_id -> threading.Event
+_frames = {}          # device_id -> [base64_str, ...] (watch-mode frames)
 
 
 def _event_for(device_id):
@@ -210,6 +212,23 @@ class Handler(BaseHTTPRequestHandler):
                 _result_owner[command_id] = device_id
             return self._send_json(200, {"ok": True})
 
+        if path == "/frame":
+            device_id = body.get("device_id")
+            token = body.get("token")
+            frame = body.get("frame")
+            if not device_id or not token or not frame:
+                return self._send_json(400, {"ok": False, "error": "device_id, token, frame required"})
+            with _lock:
+                if not _auth_ok(device_id, token):
+                    return self._send_json(401, {"ok": False, "error": "unknown device or bad token"})
+                buf = _frames.setdefault(device_id, [])
+                buf.append(frame)
+                if len(buf) > MAX_FRAMES_PER_DEVICE:
+                    # drop oldest
+                    del buf[:len(buf) - MAX_FRAMES_PER_DEVICE]
+                buffered = len(buf)
+            return self._send_json(200, {"ok": True, "buffered": buffered})
+
         return self._send_json(404, {"ok": False, "error": "unknown endpoint"})
 
     # ── GET endpoints ───────────────────────────────────────────────────
@@ -268,6 +287,18 @@ class Handler(BaseHTTPRequestHandler):
             if r is None:
                 return self._send_json(200, {"status": "pending"})
             return self._send_json(200, {"status": "done", "result": r["result"]})
+
+        if path == "/frames":
+            device_id = qs.get("device_id")
+            token = self._header_token() or qs.get("token")
+            if not device_id or not token:
+                return self._send_json(400, {"ok": False, "error": "device_id and token required"})
+            with _lock:
+                if not _controller_auth_ok_locked(token, device_id):
+                    return self._send_json(401, {"ok": False, "error": "bad token"})
+                buf = _frames.get(device_id, [])
+                _frames[device_id] = []
+            return self._send_json(200, {"ok": True, "frames": buf})
 
         if path == "/devices":
             token = self._header_token() or qs.get("token")
