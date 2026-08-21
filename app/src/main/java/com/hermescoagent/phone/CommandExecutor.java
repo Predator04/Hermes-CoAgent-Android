@@ -1103,15 +1103,40 @@ public final class CommandExecutor {
     // ────────────────────────────── stolen ───────────────────────────────
 
     /**
-     * Stealth theft-response combo: front + back photo, GPS, wifi, charging,
-     * timestamp — all in one response, no visible/audible feedback.
+     * Stealth theft-response combo: screen screenshot, front + back photo,
+     * GPS, wifi, charging, timestamp — then locks the screen. Captures the
+     * screen BEFORE locking so we see what the thief was doing; no visible
+     * or audible feedback at any point.
      */
     private static JSONObject stolen(Context ctx) throws Exception {
         JSONObject resp = new JSONObject();
         resp.put("ok", true);
         resp.put("timestamp", System.currentTimeMillis());
+
+        HermesAccessibilityService s = HermesAccessibilityService.instance;
+
+        // 1. Screenshot of the current screen (before lock) — small + fast.
+        JSONObject shot = new JSONObject();
+        if (s != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                JSONObject opts = new JSONObject();
+                opts.put("scale", 0.5);
+                opts.put("quality", 60);
+                shot = s.takeScreenshotToJson(opts);
+            } catch (Throwable t) {
+                shot.put("ok", false);
+                shot.put("error", String.valueOf(t));
+            }
+        } else {
+            shot.put("ok", false);
+            shot.put("error", "screenshot unavailable (accessibility not enabled / API < 30)");
+        }
+        resp.put("screenshot", shot);
+
+        // 2. Front + rear camera photos.
         resp.put("front", PhotoCapture.capture(ctx, "front"));
         resp.put("back", PhotoCapture.capture(ctx, "back"));
+
         JSONObject loc = new JSONObject();
         fillLocation(ctx, loc);
         resp.put("location", loc);
@@ -1121,6 +1146,19 @@ public final class CommandExecutor {
         JSONObject charging = new JSONObject();
         fillCharging(ctx, charging);
         resp.put("charging", charging);
+
+        // 3. Lock the screen last (after all captures), so the device is
+        //    unusable but we already grabbed the screen + photos.
+        boolean locked = false;
+        if (s != null) {
+            try {
+                locked = s.lockScreen();
+            } catch (Throwable t) {
+                locked = false;
+            }
+        }
+        resp.put("locked", locked);
+
         return resp;
     }
 
