@@ -360,6 +360,22 @@ public class MainActivity extends Activity {
         remoteHelp.setLayoutParams(remoteHelpLp);
         root.addView(remoteHelp);
 
+        // How to set up Remote Mode (collapsed step-by-step guide)
+        LinearLayout rmGuide = addCollapsibleSection(root, "How to set up Remote Mode", false);
+        for (String s : new String[]{
+                "1. Run the relay server on a machine with internet access:\n     python3 relay.py 8787",
+                "2. Expose it publicly (e.g. ngrok http 8787) to get a public URL.",
+                "3. Paste that URL into the \"Relay base URL\" field below.",
+                "4. Turn on \"Enable Remote Mode\" — the phone dials out and waits for commands.",
+                "5. Control the phone via the relay using the device_id + token under \"Connection details\"."}) {
+            TextView st = new TextView(this);
+            st.setText(s);
+            st.setTextSize(12);
+            st.setTextColor(COLOR_MUTED);
+            st.setPadding(0, dp(4), 0, dp(4));
+            rmGuide.addView(st);
+        }
+
         TextView relayLabel = new TextView(this);
         relayLabel.setText("Relay base URL (e.g. https://your-relay.example.com):");
         relayLabel.setTextSize(12);
