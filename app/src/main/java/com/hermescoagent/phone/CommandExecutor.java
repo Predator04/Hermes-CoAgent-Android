@@ -3,6 +3,8 @@ package com.hermescoagent.phone;
 import android.Manifest;
 import android.app.ActivityManager;
 import android.app.KeyguardManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -103,6 +105,10 @@ public final class CommandExecutor {
     private static ScheduledExecutorService findPhoneScheduler;
     private static ScheduledFuture<?> findPhoneAutoStopTask;
     private static final long FIND_PHONE_AUTO_STOP_MS = 30_000L;
+
+    // ─── Ring notification (tap-to-stop) ─────────────────────────────────
+    private static final String RING_NOTIF_CHANNEL = "hermes_ring";
+    private static final int RING_NOTIF_ID = 2;
 
     // ─── Persisted ring state (recovers if process is killed mid-ring) ───
     private static final String RING_PREFS = "hermes_ring_state";
@@ -568,6 +574,7 @@ public final class CommandExecutor {
                     }
                 }
                 startVibrateLoop(ctx);
+                showRingNotification(ctx);
                 ringActive = true;
                 resp.put("ok", started);
                 resp.put("dnd_bypassed", dndBypassed);
@@ -583,6 +590,7 @@ public final class CommandExecutor {
         synchronized (RING_LOCK) {
             try {
                 cancelFindPhoneAutoStop();
+                cancelRingNotification(ctx);
                 if (ringPlayer != null) { safeReleasePlayer(ringPlayer); ringPlayer = null; }
                 if (ringRingtone != null) { safeStopRingtone(ringRingtone); ringRingtone = null; }
                 if (ringVibrator != null) { try { ringVibrator.cancel(); } catch (Throwable ignored) {} ringVibrator = null; }
@@ -604,6 +612,66 @@ public final class CommandExecutor {
                 try { resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * Public entry point for the notification's Stop tap — silences the ring
+     * from a BroadcastReceiver without needing a remote stop_ring command.
+     */
+    public static void stopRingFromNotification(Context ctx) {
+        try {
+            stopRing(ctx, new JSONObject());
+        } catch (Throwable ignored) {}
+    }
+
+    /** Posts a "Find My Phone is ringing" notification with a Stop action. */
+    private static void showRingNotification(Context ctx) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+
+            Intent stopIntent = new Intent(ctx, RingStopReceiver.class)
+                    .setAction(RingStopReceiver.ACTION_STOP_RING);
+            PendingIntent stopPi = PendingIntent.getBroadcast(ctx, 101, stopIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            Notification n;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(
+                        RING_NOTIF_CHANNEL, "Find My Phone",
+                        NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("Alerts when this phone is being located");
+                nm.createNotificationChannel(ch);
+                n = new Notification.Builder(ctx, RING_NOTIF_CHANNEL)
+                        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                        .setContentTitle("Find My Phone")
+                        .setContentText("This phone is ringing — tap Stop to silence it")
+                        .setContentIntent(stopPi)
+                        .setCategory(Notification.CATEGORY_ALARM)
+                        .setVisibility(Notification.VISIBILITY_PUBLIC)
+                        .setAutoCancel(true)
+                        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
+                        .build();
+            } else {
+                n = new Notification.Builder(ctx)
+                        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                        .setContentTitle("Find My Phone")
+                        .setContentText("This phone is ringing — tap Stop to silence it")
+                        .setContentIntent(stopPi)
+                        .setPriority(Notification.PRIORITY_MAX)
+                        .setAutoCancel(true)
+                        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
+                        .build();
+            }
+            nm.notify(RING_NOTIF_ID, n);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void cancelRingNotification(Context ctx) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(RING_NOTIF_ID);
+        } catch (Throwable ignored) {}
     }
 
     private static void scheduleFindPhoneAutoStop(Context ctx) {
@@ -717,6 +785,7 @@ public final class CommandExecutor {
      */
     public static void restoreCrashedRingState(Context ctx) {
         try {
+            cancelRingNotification(ctx);
             SharedPreferences sp = ctx.getSharedPreferences(RING_PREFS, Context.MODE_PRIVATE);
             if (sp.contains(KEY_SAVED_DND)) {
                 int f = sp.getInt(KEY_SAVED_DND, NotificationManager.INTERRUPTION_FILTER_ALL);

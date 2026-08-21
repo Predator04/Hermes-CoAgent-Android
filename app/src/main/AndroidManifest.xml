@@ -113,5 +113,9 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".RingStopReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>
