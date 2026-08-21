@@ -246,6 +246,30 @@ public class MainActivity extends Activity {
         styleButton(startServer, BtnStyle.PRIMARY);
         root.addView(startServer);
 
+        // ─── Auto-start on boot ───────────────────────────────────────────
+        Switch autoStartToggle = new Switch(this);
+        autoStartToggle.setText("  Auto-start on boot");
+        autoStartToggle.setTextColor(Color.WHITE);
+        autoStartToggle.setChecked(BootReceiver.isAutoStartEnabled(this));
+        LinearLayout.LayoutParams autoStartLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        autoStartLp.setMargins(0, dp(12), 0, 0);
+        autoStartToggle.setLayoutParams(autoStartLp);
+        root.addView(autoStartToggle);
+
+        TextView autoStartHint = new TextView(this);
+        autoStartHint.setText("Start remote control automatically after the phone reboots. "
+                + "On some phones (OnePlus, Xiaomi, Huawei) you may also need to allow auto-launch "
+                + "in the system battery/background settings.");
+        autoStartHint.setTextSize(11);
+        autoStartHint.setTextColor(COLOR_MUTED);
+        autoStartHint.setPadding(0, 0, 0, dp(8));
+        root.addView(autoStartHint);
+
+        autoStartToggle.setOnCheckedChangeListener((btn, checked) ->
+                BootReceiver.setAutoStartEnabled(this, checked));
+
         // ─── Connection details (collapsed) ───────────────────────────────
         LinearLayout connDetails = addCollapsibleSection(root, "Connection details", false);
 
