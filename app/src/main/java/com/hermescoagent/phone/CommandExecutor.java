@@ -1582,8 +1582,8 @@ public final class CommandExecutor {
         }
         try {
             byte[] data = new byte[(int) size];
+            int off = 0;
             try (FileInputStream in = new FileInputStream(f)) {
-                int off = 0;
                 while (off < data.length) {
                     int n = in.read(data, off, data.length - off);
                     if (n < 0) break;
@@ -1591,8 +1591,9 @@ public final class CommandExecutor {
                 }
             }
             resp.put("exists", true);
-            resp.put("size", size);
-            resp.put("base64", Base64.encodeToString(data, Base64.NO_WRAP));
+            resp.put("size", off);
+            if (off < data.length) resp.put("truncated", true);
+            resp.put("base64", Base64.encodeToString(data, 0, off, Base64.NO_WRAP));
         } catch (Exception e) {
             resp.put("ok", false);
             resp.put("error", "read failed: " + e.getMessage());
@@ -1704,6 +1705,7 @@ public final class CommandExecutor {
         boolean started = false;
         String startError = null;
         PackageInstaller.Session session = null;
+        InstallStatusHandle statusHandle = null;
         try {
             PackageInstaller pkgInstaller = ctx.getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams params =
@@ -1717,12 +1719,14 @@ public final class CommandExecutor {
                 while ((n = fin.read(buf)) > 0) sOut.write(buf, 0, n);
                 session.fsync(sOut);
             }
-            IntentSender sender = installStatusSender(ctx, "INSTALL", sessionId);
-            session.commit(sender);
+            statusHandle = installStatusSender(ctx, "INSTALL", sessionId);
+            session.commit(statusHandle.sender);
+            statusHandle = null; // ownership handed to PackageInstaller — do not unregister below
             started = true;
         } catch (Throwable t) {
             startError = String.valueOf(t);
         } finally {
+            if (statusHandle != null) statusHandle.unregister();
             if (session != null) try { session.close(); } catch (Throwable ignored) {}
         }
 
@@ -1739,14 +1743,18 @@ public final class CommandExecutor {
         boolean requested = false;
         String method = "";
         String piError = null;
+        InstallStatusHandle statusHandle = null;
         try {
             PackageInstaller pi = ctx.getPackageManager().getPackageInstaller();
-            IntentSender sender = installStatusSender(ctx, "UNINSTALL", pkg.hashCode());
-            pi.uninstall(pkg, sender);
+            statusHandle = installStatusSender(ctx, "UNINSTALL", pkg.hashCode());
+            pi.uninstall(pkg, statusHandle.sender);
+            statusHandle = null;
             requested = true;
             method = "package_installer";
         } catch (Throwable t) {
             piError = String.valueOf(t);
+        } finally {
+            if (statusHandle != null) statusHandle.unregister();
         }
         if (!requested) {
             try {
@@ -1810,13 +1818,30 @@ public final class CommandExecutor {
         }
     }
 
+    // Small holder so callers can unregister the receiver when the PackageInstaller
+    // call (commit / uninstall) fails before the sender is handed to the platform.
+    private static final class InstallStatusHandle {
+        final IntentSender sender;
+        private final Context app;
+        private final BroadcastReceiver receiver;
+        private boolean unregistered;
+        InstallStatusHandle(Context app, BroadcastReceiver receiver, IntentSender sender) {
+            this.app = app; this.receiver = receiver; this.sender = sender;
+        }
+        synchronized void unregister() {
+            if (unregistered) return;
+            unregistered = true;
+            try { app.unregisterReceiver(receiver); } catch (Throwable ignored) {}
+        }
+    }
+
     // Wires up a PackageInstaller status callback that (a) auto-launches the
     // system's install/uninstall confirmation dialog when STATUS_PENDING_USER_ACTION
     // arrives, and (b) unregisters itself on any terminal status.
-    private static IntentSender installStatusSender(Context ctx, String kind, int requestId) {
+    private static InstallStatusHandle installStatusSender(Context ctx, String kind, int requestId) {
         final Context app = ctx.getApplicationContext();
         final String action = "com.hermescoagent.phone.PKG_STATUS." + kind + "." + requestId + "." + System.nanoTime();
-        final BroadcastReceiver[] holder = new BroadcastReceiver[1];
+        final InstallStatusHandle[] handleRef = new InstallStatusHandle[1];
         BroadcastReceiver rcv = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent i) {
                 int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
@@ -1828,10 +1853,9 @@ public final class CommandExecutor {
                     }
                     return;
                 }
-                try { app.unregisterReceiver(holder[0]); } catch (Throwable ignored) {}
+                if (handleRef[0] != null) handleRef[0].unregister();
             }
         };
-        holder[0] = rcv;
         IntentFilter filter = new IntentFilter(action);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             app.registerReceiver(rcv, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -1842,6 +1866,8 @@ public final class CommandExecutor {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
         PendingIntent p = PendingIntent.getBroadcast(app, requestId, intent, flags);
-        return p.getIntentSender();
+        InstallStatusHandle handle = new InstallStatusHandle(app, rcv, p.getIntentSender());
+        handleRef[0] = handle;
+        return handle;
     }
 }
