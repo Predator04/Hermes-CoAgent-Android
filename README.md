@@ -107,6 +107,20 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `clipboard_get` | — | Read the clipboard *(Android 10+ restricts background reads)* |
 | `clipboard_set` | `text` | Write the clipboard |
 
+### Files & apps
+
+| Action | Params | What it does |
+|--------|--------|--------------|
+| `file_list` | `path?` | List a directory's contents |
+| `file_info` | `path` | File/dir metadata (size, type, timestamps) |
+| `file_get` | `path` | Read a file → base64 (capped at 8 MB) |
+| `file_put` | `path`, `data` (base64), `append?` | Write/append a file |
+| `file_delete` | `path` | Delete a file or empty directory |
+| `install_apk` | `url` | Download + install an APK (needs "Install unknown apps" granted once) |
+| `uninstall` | `package` | Uninstall a package |
+| `app_info` | `package` | Version / target SDK / install dates |
+| `kill_background` | `package` | Kill a background process (foreground force-stop needs root) |
+
 ### Find-my-phone
 
 | Action | Params | What it does |

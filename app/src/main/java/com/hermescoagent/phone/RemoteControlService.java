@@ -39,7 +39,10 @@ public class RemoteControlService extends Service {
     private static final String TOKEN_HEADER = "x-hermes-token";
     private static final int HTTP_WORKERS = 4;
     private static final int SOCKET_TIMEOUT_MS = 10_000;
-    private static final int MAX_BODY_BYTES = 256 * 1024;
+    // LAN-direct clients can send the full 16 MB (needed for file_put carrying a
+    // ~2 MB base64-encoded APK). Relay-mode file_put is effectively limited to
+    // ~6 MB of raw bytes by the relay's 8 MB result-body cap on the response side.
+    private static final int MAX_BODY_BYTES = 16 * 1024 * 1024;
 
     private ServerSocket server;
     private ExecutorService workers;

@@ -123,6 +123,17 @@ public class MainActivity extends Activity {
                     new Cmd("SIM identity", "Current SIM info", "sim"),
                     new Cmd("SIM events", "Detect a SIM swap", "sim_events"),
             }),
+            new CmdGroup("Files & apps", new Cmd[]{
+                    new Cmd("List files", "List a folder's contents", "file_list"),
+                    new Cmd("File info", "Size, type, timestamps", "file_info"),
+                    new Cmd("Read a file", "Download a file's contents", "file_get"),
+                    new Cmd("Write a file", "Upload and save a file", "file_put"),
+                    new Cmd("Delete a file", "Delete a file or empty folder", "file_delete"),
+                    new Cmd("Install an app", "Download + install an APK", "install_apk"),
+                    new Cmd("Uninstall an app", "Remove a package", "uninstall"),
+                    new Cmd("App details", "Version, target SDK, dates", "app_info"),
+                    new Cmd("Kill background app", "Stop a background process", "kill_background"),
+            }),
             new CmdGroup("Service", new Cmd[]{
                     new Cmd("Health check", "Is the server alive?", "ping"),
                     new Cmd("Stop service", "Turn off remote control", "shutdown"),
