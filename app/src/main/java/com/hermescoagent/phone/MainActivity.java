@@ -20,6 +20,7 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
 import android.transition.AutoTransition;
@@ -148,6 +149,8 @@ public class MainActivity extends Activity {
     private TextView remoteStatusView;
     private EditText relayUrlField;
     private Switch remoteToggle;
+    private TextView batteryStatusView;
+    private Button batteryExemptBtn;
     private Button grantAccessibility;
     private Button startServer;
     private Button grantPermsButton;
@@ -257,7 +260,9 @@ public class MainActivity extends Activity {
         styleButton(startServer, BtnStyle.PRIMARY);
         root.addView(startServer);
 
-        // ─── Auto-start on boot ───────────────────────────────────────────
+        // ─── Settings (collapsed) ──────────────────────────────────────────
+        LinearLayout settingsContent = addCollapsibleSection(root, "Settings", false);
+
         Switch autoStartToggle = new Switch(this);
         autoStartToggle.setText("  Auto-start on boot");
         autoStartToggle.setTextColor(Color.WHITE);
@@ -265,21 +270,51 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams autoStartLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        autoStartLp.setMargins(0, dp(12), 0, 0);
+        autoStartLp.setMargins(0, dp(4), 0, 0);
         autoStartToggle.setLayoutParams(autoStartLp);
-        root.addView(autoStartToggle);
+        settingsContent.addView(autoStartToggle);
 
         TextView autoStartHint = new TextView(this);
-        autoStartHint.setText("Start remote control automatically after the phone reboots. "
-                + "On some phones (OnePlus, Xiaomi, Huawei) you may also need to allow auto-launch "
-                + "in the system battery/background settings.");
+        autoStartHint.setText("Start remote control automatically after the phone reboots.");
         autoStartHint.setTextSize(11);
         autoStartHint.setTextColor(COLOR_MUTED);
         autoStartHint.setPadding(0, 0, 0, dp(8));
-        root.addView(autoStartHint);
+        settingsContent.addView(autoStartHint);
 
         autoStartToggle.setOnCheckedChangeListener((btn, checked) ->
                 BootReceiver.setAutoStartEnabled(this, checked));
+
+        TextView batteryLabel = new TextView(this);
+        batteryLabel.setText("Battery optimization");
+        batteryLabel.setTextSize(13);
+        batteryLabel.setTextColor(COLOR_TEXT);
+        batteryLabel.setTypeface(null, Typeface.BOLD);
+        batteryLabel.setPadding(0, dp(8), 0, dp(2));
+        settingsContent.addView(batteryLabel);
+
+        batteryStatusView = new TextView(this);
+        batteryStatusView.setTextSize(12);
+        batteryStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(batteryStatusView);
+
+        batteryExemptBtn = new Button(this);
+        batteryExemptBtn.setText("Allow background activity");
+        batteryExemptBtn.setOnClickListener(v -> requestBatteryExemption());
+        styleButton(batteryExemptBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams battBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        battBtnLp.setMargins(0, dp(8), 0, dp(4));
+        batteryExemptBtn.setLayoutParams(battBtnLp);
+        settingsContent.addView(batteryExemptBtn);
+
+        TextView batteryNote = new TextView(this);
+        batteryNote.setText("Android may kill this app in the background to save battery. "
+                + "Allowing background activity keeps Remote Mode and auto-start reliable.");
+        batteryNote.setTextSize(11);
+        batteryNote.setTextColor(COLOR_MUTED);
+        batteryNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(batteryNote);
 
         // ─── Connection details (collapsed) ───────────────────────────────
         LinearLayout connDetails = addCollapsibleSection(root, "Connection details", false);
@@ -1328,6 +1363,38 @@ public class MainActivity extends Activity {
             styleButton(startServer, running ? BtnStyle.DANGER : BtnStyle.PRIMARY);
         }
         refreshPermissions();
+        renderBatteryStatus();
+    }
+
+    /** True if the OS will not restrict this app's background activity. */
+    private boolean isBatteryExempt() {
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    /** Ask the user to exempt this app from battery optimization (Doze). */
+    private void requestBatteryExemption() {
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception e2) {
+                Toast.makeText(this, "Could not open battery settings", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void renderBatteryStatus() {
+        if (batteryStatusView == null) return;
+        boolean exempt = isBatteryExempt();
+        batteryStatusView.setText(exempt ? "Background activity: Allowed" : "Background activity: Restricted");
+        batteryStatusView.setTextColor(exempt ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (batteryExemptBtn != null) {
+            batteryExemptBtn.setVisibility(exempt ? View.GONE : View.VISIBLE);
+        }
     }
 
     /**
