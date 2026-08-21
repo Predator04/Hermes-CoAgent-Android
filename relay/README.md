@@ -80,6 +80,25 @@ Reply: `{"ok": true}`
 ```
 Or `{"status":"pending"}` if the phone hasn't answered yet.
 
+### `GET /devices` — controller → relay
+List registered device_ids. Requires the controller token (`HERMES_CONTROLLER_TOKEN` env) when it's set, otherwise any registered device token.
+```json
+{"ok": true, "devices": ["abc-123", "…"]}
+```
+
+### `POST /frame` — phone → relay (watch mode)
+The phone's `watch` action streams scaled screen captures here (fire-and-forget, buffered per device, oldest dropped beyond `MAX_FRAMES_PER_DEVICE`).
+```json
+{"device_id":"abc-123","token":"hex...","frame":"<base64 jpeg>"}
+```
+Reply: `{"ok": true, "buffered": N}`
+
+### `GET /frames?device_id=…` — controller → relay (watch mode)
+Drains and returns the buffered frames (auth like `GET /result`).
+```json
+{"ok": true, "frames": ["<base64 jpeg>", "…"]}
+```
+
 ## Curl example — controller side
 
 ```bash
