@@ -39,7 +39,10 @@ public final class ControlBanner {
     private static final String COLOR_STOP_BG   = "#F85149";
     private static final String COLOR_STOP_EDGE = "#33FFFFFF";
 
+    private static final long HIDE_DELAY_MS = 1500L;
+
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable hideTask = this::hideInternal;
     private WindowManager wm;
 
     private View pillView;
@@ -55,18 +58,29 @@ public final class ControlBanner {
 
     public static ControlBanner get() { return INSTANCE; }
 
-    public static void show(Context ctx) { INSTANCE.showInternal(ctx); }
-    public static void hide() { INSTANCE.hideInternal(); }
+    /** Show the bar + red pulsing dot for an active command. Cancels any
+     *  pending hide. Called at the start of a non-stealth command. */
+    public static void showActive(Context ctx) {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
+        INSTANCE.showInternal(ctx);
+        INSTANCE.setActiveInternal(true);
+    }
+
+    /** Dot back to gray, then hide shortly after (linger) so a burst of
+     *  rapid commands keeps the bar steady instead of flickering. */
+    public static void idle() {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
+        INSTANCE.setActiveInternal(false);
+        INSTANCE.main.postDelayed(INSTANCE.hideTask, HIDE_DELAY_MS);
+    }
+
+    /** Immediately tear the bar down (stealth actions, service stop). */
+    public static void hide() {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
+        INSTANCE.hideInternal();
+    }
+
     public static boolean isShowing() { return INSTANCE.attached; }
-
-    /** Flip the dot to red + pulse (during a command) or back to gray (idle). */
-    public static void setActive(boolean on) { INSTANCE.setActiveInternal(on); }
-
-    /** Temporarily hide the bar for a stealth action (photo/mic/stolen). */
-    public static void stealthHide() { INSTANCE.stealthHideInternal(); }
-
-    /** Restore the bar after a stealth action completes. */
-    public static void stealthShow() { INSTANCE.stealthShowInternal(); }
 
     private void showInternal(Context ctx) {
         if (ctx == null) return;

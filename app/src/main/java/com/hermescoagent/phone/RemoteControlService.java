@@ -64,11 +64,8 @@ public class RemoteControlService extends Service {
         // Resume periodic GPS breadcrumbs if the user previously enabled tracking.
         LocationTracker.resumeIfEnabled(this);
         isRunning = true;
-        // Persistent "being controlled" overlay bar (STOP button + record dot).
-        // Silent no-op when SYSTEM_ALERT_WINDOW is not granted.
-        if (PermissionPrefs.enabled(this, PermissionPrefs.OVERLAY)) {
-            try { ControlBanner.show(this); } catch (Throwable ignored) {}
-        }
+        // The overlay bar is shown per-command by CommandExecutor (not for the
+        // whole service lifetime), so it only appears while actively executing.
         return START_STICKY;
     }
 
