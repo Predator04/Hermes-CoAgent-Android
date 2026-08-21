@@ -398,11 +398,13 @@ public class MainActivity extends Activity {
         // How to set up Remote Mode (collapsed step-by-step guide)
         LinearLayout rmGuide = addCollapsibleSection(root, "How to set up Remote Mode", false);
         for (String s : new String[]{
-                "1. Run the relay server on a machine with internet access:\n     python3 relay.py 8787",
-                "2. Expose it publicly (e.g. ngrok http 8787) to get a public URL.",
-                "3. Paste that URL into the \"Relay base URL\" field below.",
-                "4. Turn on \"Enable Remote Mode\" — the phone dials out and waits for commands.",
-                "5. Control the phone via the relay using the device_id + token under \"Connection details\"."}) {
+                "1. Run the relay on a computer with internet. Copy this app's relay/relay.py there and run:\n     python3 relay.py 8787",
+                "2. Sign up for a free account at ngrok.com (email or Google).",
+                "3. In the ngrok dashboard, copy your authtoken. On that computer run:\n     ngrok config add-authtoken <YOUR_TOKEN>",
+                "4. Open a public tunnel to the relay:\n     ngrok http 8787\n   ngrok prints a URL like https://abc123.ngrok-free.app",
+                "5. Copy that URL and paste it into \"Relay base URL\" below.",
+                "6. Turn on \"Enable Remote Mode\" — status turns green: remote: connected.",
+                "7. Share the device_id + token (under \"Connection details\") with the controller. It can now drive this phone from anywhere."}) {
             TextView st = new TextView(this);
             st.setText(s);
             st.setTextSize(12);
@@ -1337,7 +1339,13 @@ public class MainActivity extends Activity {
             }
         }
         if (statusIpView != null) {
-            statusIpView.setText("IP: " + ip);
+            if (isOnWifi()) {
+                statusIpView.setText("IP: " + ip + "  (Wi-Fi LAN)");
+                statusIpView.setTextColor(COLOR_GREEN_SOFT);
+            } else {
+                statusIpView.setText("No Wi-Fi — reachable via Remote Mode");
+                statusIpView.setTextColor(COLOR_AMBER_SOFT);
+            }
         }
         if (statusAccView != null) {
             if (acc) {
@@ -1407,6 +1415,20 @@ public class MainActivity extends Activity {
         if (ip != null) return ip;
         ip = ipFromConnectivity();
         return ip == null ? "unknown" : ip;
+    }
+
+    /** True when the active network is Wi-Fi (so a LAN IP is actually useful). */
+    private boolean isOnWifi() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            Network active = cm.getActiveNetwork();
+            if (active == null) return false;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+            return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String ipFromWifiManager() {

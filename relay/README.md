@@ -27,8 +27,12 @@ commands.
 
 The phone needs to reach the relay over the internet. Pick one:
 
-- **Ngrok / Cloudflare Tunnel** (fastest for testing):
-  `ngrok http 8787` → copy the `https://…ngrok-free.app` URL into the app.
+- **Ngrok** (fastest for testing):
+  1. Sign up free at [ngrok.com](https://ngrok.com) (email or Google).
+  2. Copy your authtoken from the ngrok dashboard, then run
+     `ngrok config add-authtoken <YOUR_TOKEN>`.
+  3. Run `ngrok http 8787` → copy the `https://…ngrok-free.app` URL
+     into the app.
 - **Small VPS**: run `relay.py` on a $5/mo VPS and give the phone
   `http://your.vps.ip:8787` (or put nginx + Let's Encrypt in front).
 - **Home LAN + port forward**: forward TCP 8787 on your router.
