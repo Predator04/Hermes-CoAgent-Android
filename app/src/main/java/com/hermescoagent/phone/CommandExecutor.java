@@ -33,8 +33,14 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
+import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
+
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -237,6 +243,8 @@ public final class CommandExecutor {
                 }
                 break;
             }
+            case "watch":
+                return watch(ctx, req);
             case "screenshot": {
                 if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
@@ -1111,6 +1119,104 @@ public final class CommandExecutor {
         fillCharging(ctx, charging);
         resp.put("charging", charging);
         return resp;
+    }
+
+    // ─────────────────────────────── watch ───────────────────────────────
+
+    private static JSONObject watch(Context ctx, JSONObject req) throws Exception {
+        if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
+        HermesAccessibilityService s = HermesAccessibilityService.instance;
+        if (s == null) {
+            return new JSONObject().put("ok", false).put("error", "accessibility not enabled");
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return new JSONObject().put("ok", false).put("error", "screenshot unavailable");
+        }
+
+        int duration = (int) Math.max(1, Math.min(60, Math.round(req.optDouble("duration", 20.0))));
+        double interval = Math.max(0.5, Math.min(5.0, req.optDouble("interval", 1.5)));
+        long intervalMs = (long) (interval * 1000);
+
+        String base = normalizeRelayUrl(RemoteRelayClient.getRelayUrl(ctx));
+        String deviceId = RemoteRelayClient.ensureDeviceId(ctx);
+        String token = RemoteControlService.ensureToken(ctx);
+
+        ExecutorService postExec = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "hermes-watch-post");
+            t.setDaemon(true);
+            return t;
+        });
+
+        long startMs = System.currentTimeMillis();
+        long endMs = startMs + duration * 1000L;
+        int frames = 0;
+        try {
+            while (System.currentTimeMillis() < endMs) {
+                long tickStart = System.currentTimeMillis();
+                byte[] jpeg = s.captureScreenJpeg(0.5f, 60);
+                if (jpeg != null) {
+                    final String b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP);
+                    if (!base.isEmpty()) {
+                        postExec.submit(() -> postFrameSilent(base, deviceId, token, b64));
+                    }
+                    frames++;
+                }
+                long remaining = endMs - System.currentTimeMillis();
+                if (remaining <= 0) break;
+                long sleepMs = Math.min(intervalMs - (System.currentTimeMillis() - tickStart), remaining);
+                if (sleepMs > 0) {
+                    try { Thread.sleep(sleepMs); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        } finally {
+            postExec.shutdown();
+            try { postExec.awaitTermination(5, TimeUnit.SECONDS); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        }
+
+        double actualDuration = (System.currentTimeMillis() - startMs) / 1000.0;
+        JSONObject resp = new JSONObject();
+        resp.put("ok", true);
+        resp.put("frames", frames);
+        resp.put("duration", actualDuration);
+        resp.put("interval", interval);
+        return resp;
+    }
+
+    private static String normalizeRelayUrl(String url) {
+        if (url == null) return "";
+        String u = url.trim();
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        return u;
+    }
+
+    private static void postFrameSilent(String base, String deviceId, String token, String frameB64) {
+        HttpURLConnection c = null;
+        try {
+            JSONObject body = new JSONObject();
+            body.put("device_id", deviceId);
+            body.put("token", token);
+            body.put("frame", frameB64);
+            byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+            c = (HttpURLConnection) new URL(base + "/frame").openConnection();
+            c.setRequestMethod("POST");
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            c.setRequestProperty("Accept", "application/json");
+            c.setFixedLengthStreamingMode(payload.length);
+            try (OutputStream os = c.getOutputStream()) {
+                os.write(payload);
+            }
+            // Drain the response so the connection can be reused / closed cleanly.
+            try { c.getResponseCode(); } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+            // fire-and-forget
+        } finally {
+            if (c != null) try { c.disconnect(); } catch (Throwable ignored) {}
+        }
     }
 
     // ────────────────────────────── open_url ─────────────────────────────

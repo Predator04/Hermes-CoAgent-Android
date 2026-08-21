@@ -498,4 +498,74 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (s > 1f) return 1f;
         return s;
     }
+
+    /**
+     * Capture the current screen and return raw JPEG bytes, or null on failure.
+     * Used by the streaming {@code watch} action to avoid the disk I/O and
+     * metadata overhead of {@link #takeScreenshotToJson(JSONObject)}.
+     */
+    public byte[] captureScreenJpeg(float scale, int quality) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null;
+        final float s = clampScale(scale);
+        final int q = Math.max(1, Math.min(100, quality));
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<Bitmap> bitmapRef = new AtomicReference<>();
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY,
+                    screenshotCallbackExec(),
+                    new TakeScreenshotCallback() {
+                        @Override
+                        public void onSuccess(ScreenshotResult result) {
+                            HardwareBuffer hb = null;
+                            Bitmap wrapped = null;
+                            try {
+                                hb = result.getHardwareBuffer();
+                                ColorSpace cs = result.getColorSpace();
+                                wrapped = Bitmap.wrapHardwareBuffer(hb, cs);
+                                if (wrapped != null) {
+                                    bitmapRef.set(wrapped.copy(Bitmap.Config.ARGB_8888, false));
+                                }
+                            } catch (Throwable ignored) {
+                            } finally {
+                                if (wrapped != null) wrapped.recycle();
+                                if (hb != null) hb.close();
+                                latch.countDown();
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(int errorCode) {
+                            latch.countDown();
+                        }
+                    });
+        } catch (Throwable t) {
+            return null;
+        }
+        try {
+            if (!latch.await(SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return null;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        Bitmap bmp = bitmapRef.get();
+        if (bmp == null) return null;
+
+        Bitmap toEncode = bmp;
+        try {
+            if (s > 0f && s < 0.999f) {
+                int sw = Math.max(1, Math.round(bmp.getWidth() * s));
+                int sh = Math.max(1, Math.round(bmp.getHeight() * s));
+                toEncode = Bitmap.createScaledBitmap(bmp, sw, sh, true);
+            }
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(64 * 1024);
+            toEncode.compress(Bitmap.CompressFormat.JPEG, q, baos);
+            return baos.toByteArray();
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (toEncode != bmp) toEncode.recycle();
+            bmp.recycle();
+        }
+    }
 }
