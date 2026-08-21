@@ -595,9 +595,9 @@ public class MainActivity extends Activity {
         checkUpdates.setText("Check for updates");
         checkUpdates.setOnClickListener(v -> {
             Toast.makeText(MainActivity.this, "Checking for updates…", Toast.LENGTH_SHORT).show();
-            UpdateChecker.checkForUpdate(MainActivity.this, true, (available, code, name1, apkUrl) -> {
+            UpdateChecker.checkForUpdate(MainActivity.this, true, (available, code, name1, apkUrl, notes) -> {
                 if (available) {
-                    showUpdateDialog(code, name1, apkUrl);
+                    showUpdateDialog(code, name1, apkUrl, notes);
                 } else {
                     Toast.makeText(MainActivity.this, "You're on the latest version.", Toast.LENGTH_SHORT).show();
                 }
@@ -627,8 +627,8 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         updateStatus();
 
-        UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl) -> {
-            if (available) showUpdateDialog(code, name1, apkUrl);
+        UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl, notes) -> {
+            if (available) showUpdateDialog(code, name1, apkUrl, notes);
         });
     }
 
@@ -1358,11 +1358,15 @@ public class MainActivity extends Activity {
 
     // ─────────────────────────── remote status ──────────────────────────
 
-    private void showUpdateDialog(int latestCode, String releaseName, String apkUrl) {
+    private void showUpdateDialog(int latestCode, String releaseName, String apkUrl, String notes) {
         if (isFinishing()) return;
+        String msg = "Version " + releaseName + " is available.";
+        if (notes != null && !notes.trim().isEmpty()) {
+            msg += "\n\n" + cleanNotes(notes);
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Update Available")
-                .setMessage("Version " + releaseName + " is available.")
+                .setMessage(msg)
                 .setPositiveButton("Update Now", (d, w) -> {
                     UpdateChecker.downloadAndInstall(MainActivity.this, apkUrl);
                     d.dismiss();
@@ -1373,6 +1377,14 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Later", (d, w) -> d.dismiss())
                 .show();
+    }
+
+    private String cleanNotes(String s) {
+        if (s == null) return "";
+        return s.replace("**", "").replace("`", "")
+                .replaceAll("(?m)^#+\\s*", "")
+                .replaceAll("(?m)^\\s*-\\s*", "• ")
+                .trim();
     }
 
     private void onRemoteStatusChanged(RemoteRelayClient.Status s, String detail) {

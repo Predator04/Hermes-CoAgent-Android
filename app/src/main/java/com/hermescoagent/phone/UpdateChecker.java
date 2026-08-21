@@ -23,7 +23,7 @@ import java.net.URL;
 public final class UpdateChecker {
 
     public interface Callback {
-        void onResult(boolean available, int latestVersionCode, String releaseName, String apkUrl);
+        void onResult(boolean available, int latestVersionCode, String releaseName, String apkUrl, String notes);
     }
 
     private static final String PREFS = "hermes_updates";
@@ -48,13 +48,13 @@ public final class UpdateChecker {
                 long now = System.currentTimeMillis();
                 long last = sp.getLong(KEY_LAST_CHECK, 0L);
                 if (!manual && (now - last) < TWELVE_HOURS_MS) {
-                    main.post(() -> cb.onResult(false, 0, null, null));
+                    main.post(() -> cb.onResult(false, 0, null, null, null));
                     return;
                 }
 
                 String body = httpGet(RELEASES_URL);
                 if (body == null) {
-                    main.post(() -> cb.onResult(false, 0, null, null));
+                    main.post(() -> cb.onResult(false, 0, null, null, null));
                     return;
                 }
 
@@ -62,6 +62,7 @@ public final class UpdateChecker {
                 String tag = json.optString("tag_name", "");
                 String name = json.optString("name", "");
                 if (name == null || name.isEmpty()) name = tag;
+                String notes = json.optString("body", "");
 
                 int latestCode = 0;
                 try {
@@ -77,7 +78,7 @@ public final class UpdateChecker {
                 if (latestCode <= currentCode || latestCode == skipped) {
                     final int lc = latestCode;
                     final String rn = name;
-                    main.post(() -> cb.onResult(false, lc, rn, null));
+                    main.post(() -> cb.onResult(false, lc, rn, null, notes));
                     return;
                 }
 
@@ -98,9 +99,9 @@ public final class UpdateChecker {
                 final int lc = latestCode;
                 final String rn = name;
                 final String url = apkUrl;
-                main.post(() -> cb.onResult(true, lc, rn, url));
+                main.post(() -> cb.onResult(true, lc, rn, url, notes));
             } catch (Exception e) {
-                main.post(() -> cb.onResult(false, 0, null, null));
+                main.post(() -> cb.onResult(false, 0, null, null, null));
             }
         }, "UpdateChecker").start();
     }
