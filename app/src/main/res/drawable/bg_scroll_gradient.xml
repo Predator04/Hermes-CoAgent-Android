@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Base multi-stop dark gradient (deep navy → charcoal → deeper navy) -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="270"
+                android:startColor="#0B1220"
+                android:centerColor="#0D1117"
+                android:endColor="#0A0F1C" />
+        </shape>
+    </item>
+
+    <!-- Soft teal glow, top-left -->
+    <item
+        android:width="520dp"
+        android:height="520dp"
+        android:gravity="top|start"
+        android:left="-140dp"
+        android:top="-180dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="300dp"
+                android:startColor="#3D0EA5B7"
+                android:endColor="#000EA5B7" />
+            <corners android:radius="260dp" />
+        </shape>
+    </item>
+
+    <!-- Soft blue glow, bottom-right -->
+    <item
+        android:width="620dp"
+        android:height="620dp"
+        android:gravity="bottom|end"
+        android:right="-180dp"
+        android:bottom="-220dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="380dp"
+                android:startColor="#3D1F6FEB"
+                android:endColor="#001F6FEB" />
+            <corners android:radius="310dp" />
+        </shape>
+    </item>
+
+</layer-list>

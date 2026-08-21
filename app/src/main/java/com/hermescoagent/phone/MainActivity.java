@@ -1,6 +1,7 @@
 package com.hermescoagent.phone;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
@@ -8,6 +9,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
@@ -20,8 +22,12 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
-import android.view.View;
+import android.transition.AutoTransition;
+import android.transition.TransitionManager;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -66,6 +72,7 @@ public class MainActivity extends Activity {
     private Button startServer;
     private Button grantPermsButton;
     private TextView permsSummaryView;
+    private TextView permsHeaderStatusView;
 
     private final List<PermSpec> permSpecs = new ArrayList<>();
 
@@ -79,11 +86,15 @@ public class MainActivity extends Activity {
         CommandExecutor.restoreCrashedRingState(this);
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(COLOR_BG);
+        scroll.setBackgroundResource(R.drawable.bg_scroll_gradient);
+        scroll.setClipChildren(false);
+        scroll.setClipToPadding(false);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(28), dp(20), dp(28));
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
 
         // ─── Title ────────────────────────────────────────────────────────
         TextView title = new TextView(this);
@@ -400,7 +411,19 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 0, bottomMargin);
         card.setLayoutParams(lp);
+        applyGlassElevation(card, 20, 6);
         return card;
+    }
+
+    // Rounded outline + soft elevation so drop-shadows follow the card's corners.
+    private void applyGlassElevation(View v, int cornerDp, int elevationDp) {
+        final int r = dp(cornerDp);
+        v.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), r);
+            }
+        });
+        v.setElevation(dp(elevationDp));
     }
 
     private TextView addSectionHeader(LinearLayout parent, String text) {
@@ -422,11 +445,14 @@ public class MainActivity extends Activity {
         LinearLayout sectionCard = new LinearLayout(this);
         sectionCard.setOrientation(LinearLayout.VERTICAL);
         sectionCard.setBackgroundResource(R.drawable.bg_card);
+        sectionCard.setClipChildren(false);
+        sectionCard.setClipToPadding(false);
         LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         sectionLp.setMargins(0, dp(12), 0, 0);
         sectionCard.setLayoutParams(sectionLp);
+        applyGlassElevation(sectionCard, 20, 6);
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -460,6 +486,8 @@ public class MainActivity extends Activity {
 
         header.setOnClickListener(v -> {
             boolean expanded = content.getVisibility() == View.VISIBLE;
+            TransitionManager.beginDelayedTransition(sectionCard,
+                    new AutoTransition().setDuration(180));
             content.setVisibility(expanded ? View.GONE : View.VISIBLE);
             chevron.setText(expanded ? "▸" : "▾");
         });
@@ -468,26 +496,37 @@ public class MainActivity extends Activity {
         return content;
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private void styleButton(Button b, BtnStyle style) {
         int bg;
         int textColor;
+        int corner;
+        int elevation;
         switch (style) {
             case PRIMARY:
                 bg = R.drawable.bg_button_primary;
                 textColor = Color.WHITE;
+                corner = 14;
+                elevation = 8;
                 break;
             case DANGER:
                 bg = R.drawable.bg_button_danger;
                 textColor = Color.WHITE;
+                corner = 14;
+                elevation = 6;
                 break;
             case GHOST:
                 bg = R.drawable.bg_button_ghost;
                 textColor = COLOR_MUTED;
+                corner = 12;
+                elevation = 0;
                 break;
             case SECONDARY:
             default:
                 bg = R.drawable.bg_button_secondary;
                 textColor = COLOR_TEXT;
+                corner = 14;
+                elevation = 3;
                 break;
         }
         b.setBackgroundResource(bg);
@@ -497,12 +536,30 @@ public class MainActivity extends Activity {
         b.setTextSize(14);
         b.setPadding(dp(16), dp(10), dp(16), dp(10));
         b.setStateListAnimator(null);
-        b.setElevation(0);
+        if (elevation > 0) {
+            applyGlassElevation(b, corner, elevation);
+        } else {
+            b.setElevation(0);
+        }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(10), 0, 0);
         b.setLayoutParams(lp);
+
+        // Subtle press-scale so the buttons feel "physical".
+        b.setOnTouchListener((v, ev) -> {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    v.animate().scaleX(0.97f).scaleY(0.97f).setDuration(120).start();
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(160).start();
+                    break;
+            }
+            return false;
+        });
     }
 
     // ─────────────────────────── permissions UI ─────────────────────────
@@ -569,7 +626,75 @@ public class MainActivity extends Activity {
     }
 
     private void initPermissionsSection(LinearLayout root) {
-        addSectionHeader(root, "Permissions");
+        // Collapsible "Permissions" card whose header shows a live one-line status.
+        final LinearLayout sectionCard = new LinearLayout(this);
+        sectionCard.setOrientation(LinearLayout.VERTICAL);
+        sectionCard.setBackgroundResource(R.drawable.bg_card);
+        sectionCard.setClipChildren(false);
+        sectionCard.setClipToPadding(false);
+        LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        sectionLp.setMargins(0, dp(24), 0, 0);
+        sectionCard.setLayoutParams(sectionLp);
+        applyGlassElevation(sectionCard, 20, 6);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(14), dp(14), dp(14), dp(14));
+        header.setClickable(true);
+        header.setFocusable(true);
+
+        LinearLayout headerText = new LinearLayout(this);
+        headerText.setOrientation(LinearLayout.VERTICAL);
+        headerText.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Permissions");
+        titleView.setTextColor(COLOR_TEXT);
+        titleView.setTextSize(16);
+        titleView.setTypeface(null, Typeface.BOLD);
+        headerText.addView(titleView);
+
+        permsHeaderStatusView = new TextView(this);
+        permsHeaderStatusView.setTextSize(12);
+        permsHeaderStatusView.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        statusLp.setMargins(0, dp(2), 0, 0);
+        permsHeaderStatusView.setLayoutParams(statusLp);
+        headerText.addView(permsHeaderStatusView);
+
+        header.addView(headerText);
+
+        final TextView chevron = new TextView(this);
+        chevron.setTextColor(COLOR_MUTED);
+        chevron.setTextSize(14);
+        chevron.setText("▸");
+        header.addView(chevron);
+
+        sectionCard.addView(header);
+
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), 0, dp(14), dp(14));
+        content.setClipChildren(false);
+        content.setClipToPadding(false);
+        content.setVisibility(View.GONE);
+        sectionCard.addView(content);
+
+        header.setOnClickListener(v -> {
+            boolean expanded = content.getVisibility() == View.VISIBLE;
+            TransitionManager.beginDelayedTransition(sectionCard,
+                    new AutoTransition().setDuration(180));
+            content.setVisibility(expanded ? View.GONE : View.VISIBLE);
+            chevron.setText(expanded ? "▸" : "▾");
+        });
+
+        root.addView(sectionCard);
 
         TextView subtitle = new TextView(this);
         subtitle.setText("Check the features you want. Tap ? for the reason. "
@@ -579,9 +704,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        subLp.setMargins(0, 0, 0, dp(10));
+        subLp.setMargins(0, dp(4), 0, dp(10));
         subtitle.setLayoutParams(subLp);
-        root.addView(subtitle);
+        content.addView(subtitle);
 
         permsSummaryView = new TextView(this);
         permsSummaryView.setTextSize(13);
@@ -591,15 +716,15 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         summaryLp.setMargins(0, 0, 0, dp(4));
         permsSummaryView.setLayoutParams(summaryLp);
-        root.addView(permsSummaryView);
+        content.addView(permsSummaryView);
 
         grantPermsButton = new Button(this);
         grantPermsButton.setText("Grant permissions");
         grantPermsButton.setOnClickListener(v -> onGrantAllClicked());
         styleButton(grantPermsButton, BtnStyle.PRIMARY);
-        root.addView(grantPermsButton);
+        content.addView(grantPermsButton);
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.LOC,
                 "Location (GPS)",
                 "To get the phone's position for the `location` command and the `stolen` anti-theft response.",
@@ -610,7 +735,7 @@ public class MainActivity extends Activity {
                 },
                 null, null));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.BG_LOC,
                 "Background location",
                 "To log a route (GPS breadcrumbs) for `tracking`/`location_history`, even while the app is in the background.",
@@ -628,7 +753,7 @@ public class MainActivity extends Activity {
                     return i;
                 }));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.CAM,
                 "Camera",
                 "To silently take front/back photos via `photo` and `stolen` so you can see who has the phone.",
@@ -636,7 +761,7 @@ public class MainActivity extends Activity {
                 new String[]{Manifest.permission.CAMERA},
                 null, null));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.MIC,
                 "Microphone",
                 "To record ambient audio via `mic` so you can hear what's happening around the phone.",
@@ -644,7 +769,7 @@ public class MainActivity extends Activity {
                 new String[]{Manifest.permission.RECORD_AUDIO},
                 null, null));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.PHONE,
                 "Phone state / SIM",
                 "To read the SIM identity via `sim`/`sim_events` and detect if a thief swaps the SIM card.",
@@ -652,7 +777,7 @@ public class MainActivity extends Activity {
                 new String[]{Manifest.permission.READ_PHONE_STATE},
                 null, null));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.POST_NOTIF,
                 "Notifications",
                 "Required by Android to show the persistent 'remote control running' status-bar notification while the foreground service is active.",
@@ -660,7 +785,7 @@ public class MainActivity extends Activity {
                 new String[]{Manifest.permission.POST_NOTIFICATIONS},
                 null, null));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.DND,
                 "DND access",
                 "So the `ring` command can play sound even when the phone is on silent or Do Not Disturb.",
@@ -673,7 +798,7 @@ public class MainActivity extends Activity {
                 },
                 () -> new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.NOTIF_LISTENER,
                 "Notification access",
                 "So you can read (`notifications`) and dismiss (`dismiss_notification`) the phone's notifications remotely.",
@@ -687,7 +812,7 @@ public class MainActivity extends Activity {
                 },
                 () -> new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.BATT,
                 "Battery exemption",
                 "So Android doesn't kill the background service and cut off remote control.",
@@ -699,7 +824,7 @@ public class MainActivity extends Activity {
                 },
                 this::batteryExemptionIntent));
 
-        addPermRow(root, new PermSpec(
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.OVERLAY,
                 "Display over other apps",
                 "To show a small 'being controlled' pill at the top of the screen while a command is running.",
@@ -729,6 +854,7 @@ public class MainActivity extends Activity {
         cardLp.setMargins(0, dp(10), 0, 0);
         card.setLayoutParams(cardLp);
         card.setBackgroundResource(R.drawable.bg_card);
+        applyGlassElevation(card, 20, 4);
 
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -921,6 +1047,19 @@ public class MainActivity extends Activity {
                 }
                 permsSummaryView.setText(sb.toString());
                 permsSummaryView.setTextColor(COLOR_AMBER);
+            }
+        }
+        if (permsHeaderStatusView != null) {
+            if (applicable == 0) {
+                permsHeaderStatusView.setText("Off");
+                permsHeaderStatusView.setTextColor(COLOR_MUTED);
+            } else if (missingLabels.isEmpty()) {
+                permsHeaderStatusView.setText("✅ All permissions set");
+                permsHeaderStatusView.setTextColor(COLOR_GREEN);
+            } else {
+                int n = missingLabels.size();
+                permsHeaderStatusView.setText("⚠️ " + n + " to review");
+                permsHeaderStatusView.setTextColor(COLOR_AMBER);
             }
         }
     }
