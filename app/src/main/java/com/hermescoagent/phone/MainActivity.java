@@ -60,6 +60,75 @@ public class MainActivity extends Activity {
 
     private enum BtnStyle { PRIMARY, SECONDARY, DANGER, GHOST }
 
+    // ─── Command reference data (human-friendly) ────────────────────────
+    private static final class Cmd {
+        final String name, desc, action;
+        Cmd(String name, String desc, String action) { this.name = name; this.desc = desc; this.action = action; }
+    }
+    private static final class CmdGroup {
+        final String title;
+        final Cmd[] commands;
+        CmdGroup(String title, Cmd[] commands) { this.title = title; this.commands = commands; }
+    }
+    private static final CmdGroup[] COMMAND_GROUPS = {
+            new CmdGroup("Screen control", new Cmd[]{
+                    new Cmd("Tap the screen", "Tap at an (x, y) coordinate", "tap"),
+                    new Cmd("Swipe", "Drag between two points", "swipe"),
+                    new Cmd("Type text", "Type into the focused field", "type"),
+                    new Cmd("Press a key", "Back, home, recents, power", "key"),
+                    new Cmd("Open an app", "Launch by package name", "launch"),
+                    new Cmd("Scroll", "Scroll the focused list", "scroll"),
+                    new Cmd("Wait", "Wait for text to appear", "wait"),
+                    new Cmd("Wake screen", "Turn the screen on", "wake"),
+            }),
+            new CmdGroup("See the screen", new Cmd[]{
+                    new Cmd("Read the screen", "Dump the UI tree as text", "dump"),
+                    new Cmd("Find", "Search the UI for text", "find"),
+                    new Cmd("Find & tap", "Find a UI element, tap it", "find_tap"),
+                    new Cmd("Screenshot", "Capture the screen as an image", "screenshot"),
+                    new Cmd("Live view", "Stream frames to the relay", "watch"),
+                    new Cmd("Screen size", "Width, height, density", "screen_size"),
+            }),
+            new CmdGroup("Device", new Cmd[]{
+                    new Cmd("Battery", "Level and charging state", "battery"),
+                    new Cmd("Device info", "Model, Android version", "info"),
+                    new Cmd("Installed apps", "List launchable apps", "list_apps"),
+                    new Cmd("Location", "GPS position", "location"),
+                    new Cmd("Wi-Fi", "SSID and signal", "wifi"),
+                    new Cmd("Charging", "Charging state", "charging"),
+                    new Cmd("Read clipboard", "Copy the clipboard", "clipboard_get"),
+                    new Cmd("Write clipboard", "Set clipboard text", "clipboard_set"),
+            }),
+            new CmdGroup("Find my phone", new Cmd[]{
+                    new Cmd("Ring", "Loud ring, bypasses silent", "ring"),
+                    new Cmd("Stop ringing", "Stop the ring", "stop_ring"),
+                    new Cmd("Find phone", "Location + ring + battery", "find_phone"),
+                    new Cmd("Flashlight", "Toggle the light", "flashlight"),
+                    new Cmd("Speak", "Text-to-speech out loud", "speak"),
+                    new Cmd("Vibrate", "Pulse the vibration motor", "vibrate"),
+            }),
+            new CmdGroup("Privacy & notifications", new Cmd[]{
+                    new Cmd("Notifications", "List active notifications", "notifications"),
+                    new Cmd("Dismiss", "Clear a notification", "dismiss_notification"),
+                    new Cmd("Privacy mode", "Block screen / dump reads", "privacy"),
+                    new Cmd("Command log", "Recent command history", "log"),
+            }),
+            new CmdGroup("Anti-theft", new Cmd[]{
+                    new Cmd("Stolen response", "Screenshot + photos + GPS + lock", "stolen"),
+                    new Cmd("Take a photo", "Silent front / rear capture", "photo"),
+                    new Cmd("Record audio", "Capture ambient sound", "mic"),
+                    new Cmd("Lock screen", "Lock the phone", "lock"),
+                    new Cmd("Location tracking", "GPS breadcrumbs on a timer", "tracking"),
+                    new Cmd("Location history", "Logged breadcrumbs", "location_history"),
+                    new Cmd("SIM identity", "Current SIM info", "sim"),
+                    new Cmd("SIM events", "Detect a SIM swap", "sim_events"),
+            }),
+            new CmdGroup("Service", new Cmd[]{
+                    new Cmd("Health check", "Is the server alive?", "ping"),
+                    new Cmd("Stop service", "Turn off remote control", "shutdown"),
+            }),
+    };
+
     private TextView statusView;      // "● Running — port 8765" / "○ Stopped"
     private TextView statusIpView;
     private TextView statusAccView;
@@ -362,33 +431,18 @@ public class MainActivity extends Activity {
         LinearLayout cmdRef = addCollapsibleSection(root, "Command reference", false);
 
         TextView note = new TextView(this);
-        note.setText("Commands are sent to http://<this-ip>:8765/cmd as JSON with the\n" +
-                "X-Hermes-Token header. Examples:\n" +
-                "{\"action\":\"tap\",\"x\":100,\"y\":200}\n" +
-                "{\"action\":\"swipe\",\"x1\":100,\"y1\":500,\"x2\":100,\"y2\":200}\n" +
-                "{\"action\":\"type\",\"text\":\"hello\"}\n" +
-                "{\"action\":\"key\",\"code\":\"back\"}\n" +
-                "{\"action\":\"launch\",\"package\":\"com.android.settings\"}\n" +
-                "{\"action\":\"screen_size\"}  /  {\"action\":\"list_apps\"}\n" +
-                "{\"action\":\"battery\"}  /  {\"action\":\"info\"}  /  {\"action\":\"ping\"}  /  {\"action\":\"shutdown\"}\n" +
-                "Find-my-phone: {\"action\":\"ring\"}, {\"action\":\"stop_ring\"},\n" +
-                "  {\"action\":\"location\"}, {\"action\":\"flashlight\",\"on\":true},\n" +
-                "  {\"action\":\"speak\",\"text\":\"hi\"}, {\"action\":\"vibrate\"},\n" +
-                "  {\"action\":\"wifi\"}, {\"action\":\"charging\"}, {\"action\":\"find_phone\"}\n" +
-                "Agent-control: {\"action\":\"wait\",\"for\":\"OK\",\"until\":\"appear\",\"timeout_ms\":5000},\n" +
-                "  {\"action\":\"scroll\",\"direction\":\"down\"},\n" +
-                "  {\"action\":\"clipboard_get\"}, {\"action\":\"clipboard_set\",\"text\":\"…\"},\n" +
-                "  {\"action\":\"snapshot\"}, {\"action\":\"wake\"}, {\"action\":\"log\"}\n" +
-                "Notifications: {\"action\":\"notifications\"},\n" +
-                "  {\"action\":\"dismiss_notification\",\"key\":\"…\"} or {\"package\":\"…\"}\n" +
-                "Privacy: {\"action\":\"privacy\",\"on\":true|false} — locks screenshot/dump/snapshot/notifications\n" +
-                "Anti-theft: {\"action\":\"mic\",\"seconds\":10},\n" +
-                "  {\"action\":\"tracking\",\"on\":true|false}, {\"action\":\"location_history\"},\n" +
-                "  {\"action\":\"sim\"}, {\"action\":\"sim_events\"}");
+        note.setText("What the assistant can do on this phone. Each row shows the command name on the right.");
         note.setTextSize(12);
         note.setTextColor(COLOR_MUTED);
-        note.setTypeface(Typeface.MONOSPACE);
+        note.setPadding(0, 0, 0, dp(4));
         cmdRef.addView(note);
+
+        for (CmdGroup g : COMMAND_GROUPS) {
+            addCommandGroupHeader(cmdRef, g.title);
+            for (Cmd c : g.commands) {
+                addCommandRow(cmdRef, c.name, c.desc, c.action);
+            }
+        }
 
         scroll.addView(root);
         setContentView(scroll);
@@ -498,6 +552,57 @@ public class MainActivity extends Activity {
 
         parent.addView(sectionCard);
         return content;
+    }
+
+    private void addCommandGroupHeader(LinearLayout parent, String title) {
+        TextView h = new TextView(this);
+        h.setText(title.toUpperCase());
+        h.setTextSize(11);
+        h.setTextColor(COLOR_AMBER_SOFT);
+        h.setTypeface(null, Typeface.BOLD);
+        h.setLetterSpacing(0.08f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(12), 0, dp(2));
+        h.setLayoutParams(lp);
+        parent.addView(h);
+    }
+
+    private void addCommandRow(LinearLayout parent, String name, String desc, String action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        parent.addView(row);
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        left.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(left);
+
+        TextView nameV = new TextView(this);
+        nameV.setText(name);
+        nameV.setTextSize(13);
+        nameV.setTextColor(COLOR_TEXT);
+        nameV.setTypeface(null, Typeface.BOLD);
+        left.addView(nameV);
+
+        TextView descV = new TextView(this);
+        descV.setText(desc);
+        descV.setTextSize(11);
+        descV.setTextColor(COLOR_MUTED);
+        left.addView(descV);
+
+        TextView actionV = new TextView(this);
+        actionV.setText(action);
+        actionV.setTextSize(12);
+        actionV.setTextColor(COLOR_ACCENT);
+        actionV.setTypeface(Typeface.MONOSPACE);
+        actionV.setPadding(dp(10), dp(3), dp(10), dp(3));
+        actionV.setBackgroundResource(R.drawable.bg_code_block);
+        row.addView(actionV);
     }
 
     @SuppressLint("ClickableViewAccessibility")
