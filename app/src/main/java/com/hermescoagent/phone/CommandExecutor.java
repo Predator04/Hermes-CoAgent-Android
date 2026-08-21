@@ -133,11 +133,12 @@ public final class CommandExecutor {
         String result;
         boolean ok = false;
         String summary = null;
-        boolean bannerShown = false;
+        boolean stealth = STEALTH_ACTIONS.contains(action);
         try {
-            if (!STEALTH_ACTIONS.contains(action)
-                    && PermissionPrefs.enabled(ctx, PermissionPrefs.OVERLAY)) {
-                try { ControlBanner.show(ctx); bannerShown = true; } catch (Throwable ignored) {}
+            if (stealth) {
+                try { ControlBanner.stealthHide(); } catch (Throwable ignored) {}
+            } else {
+                try { ControlBanner.setActive(true); } catch (Throwable ignored) {}
             }
             JSONObject resp = dispatch(ctx, action, req);
             ok = resp.optBoolean("ok", false);
@@ -148,8 +149,10 @@ public final class CommandExecutor {
             try { result = new JSONObject().put("ok", false).put("error", summary).toString(); }
             catch (Exception ex) { result = "{\"ok\":false}"; }
         } finally {
-            if (bannerShown) {
-                try { ControlBanner.hide(); } catch (Throwable ignored) {}
+            if (stealth) {
+                try { ControlBanner.stealthShow(); } catch (Throwable ignored) {}
+            } else {
+                try { ControlBanner.setActive(false); } catch (Throwable ignored) {}
             }
         }
         recordLog(action, ok, summary);

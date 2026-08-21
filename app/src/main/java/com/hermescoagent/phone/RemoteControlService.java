@@ -64,6 +64,11 @@ public class RemoteControlService extends Service {
         // Resume periodic GPS breadcrumbs if the user previously enabled tracking.
         LocationTracker.resumeIfEnabled(this);
         isRunning = true;
+        // Persistent "being controlled" overlay bar (STOP button + record dot).
+        // Silent no-op when SYSTEM_ALERT_WINDOW is not granted.
+        if (PermissionPrefs.enabled(this, PermissionPrefs.OVERLAY)) {
+            try { ControlBanner.show(this); } catch (Throwable ignored) {}
+        }
         return START_STICKY;
     }
 
@@ -246,6 +251,7 @@ public class RemoteControlService extends Service {
     public void onDestroy() {
         running = false;
         isRunning = false;
+        try { ControlBanner.hide(); } catch (Throwable ignored) {}
         try { if (server != null) server.close(); } catch (Exception ignored) {}
         server = null;
         if (workers != null) {

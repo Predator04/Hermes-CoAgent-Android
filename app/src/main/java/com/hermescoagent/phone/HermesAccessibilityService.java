@@ -332,8 +332,12 @@ public class HermesAccessibilityService extends AccessibilityService {
     // Screenshot rate limit is ~1/sec on many OEM ROMs, but the callback usually
     // completes within a few hundred ms. 5s covers cold-start jank.
     private static final long SCREENSHOT_TIMEOUT_MS = 5000L;
+    // Defaults tuned for vision-round-trip latency: ~50% resize, JPEG q60, and
+    // a 1080px longest-edge cap keep frames small (~15–30KB) without hurting
+    // text legibility. Callers can override each via opts on takeScreenshotToJson.
     private static final float DEFAULT_SCREENSHOT_SCALE = 0.5f;
-    private static final int DEFAULT_JPEG_QUALITY = 70;
+    private static final int DEFAULT_JPEG_QUALITY = 60;
+    private static final int DEFAULT_MAX_EDGE = 1080;
 
     // Shared executor for takeScreenshot callbacks. Previously we created a new
     // single-thread executor per call — each leaked a live thread forever.
@@ -355,9 +359,13 @@ public class HermesAccessibilityService extends AccessibilityService {
      * orig_width, orig_height, bytes, base64 (optional) }.
      *
      * Options in {@code opts}:
-     *   scale         (double, default 0.5)  — resize factor before compression
-     *   quality       (int,    default 70)   — JPEG quality 1..100
-     *   include_base64(boolean,default true) — embed base64 JPEG in the response
+     *   scale         (double, default 0.5)   — resize factor before compression
+     *   quality       (int,    default 60)    — JPEG quality 1..100
+     *   max_edge      (int,    default 1080)  — cap for the longest edge (0 = no cap)
+     *   include_base64(boolean,default true)  — embed base64 JPEG in the response
+     *
+     * Pass {@code max_edge=0} (and typically {@code scale=1.0}) to bypass the
+     * optimized-frame path and get a full-resolution capture.
      */
     public JSONObject takeScreenshotToJson(JSONObject opts) throws JSONException {
         JSONObject resp = new JSONObject();
@@ -369,6 +377,7 @@ public class HermesAccessibilityService extends AccessibilityService {
 
         final float scale = clampScale((float) opts.optDouble("scale", DEFAULT_SCREENSHOT_SCALE));
         final int quality = Math.max(1, Math.min(100, opts.optInt("quality", DEFAULT_JPEG_QUALITY)));
+        final int maxEdge = Math.max(0, opts.optInt("max_edge", DEFAULT_MAX_EDGE));
         final boolean includeBase64 = opts.optBoolean("include_base64", true);
 
         final CountDownLatch latch = new CountDownLatch(1);
@@ -441,11 +450,24 @@ public class HermesAccessibilityService extends AccessibilityService {
         int origW = bmp.getWidth();
         int origH = bmp.getHeight();
 
-        Bitmap toEncode = bmp;
+        int targetW = origW;
+        int targetH = origH;
         if (scale > 0f && scale < 0.999f) {
-            int sw = Math.max(1, Math.round(origW * scale));
-            int sh = Math.max(1, Math.round(origH * scale));
-            toEncode = Bitmap.createScaledBitmap(bmp, sw, sh, true);
+            targetW = Math.max(1, Math.round(origW * scale));
+            targetH = Math.max(1, Math.round(origH * scale));
+        }
+        if (maxEdge > 0) {
+            int longest = Math.max(targetW, targetH);
+            if (longest > maxEdge) {
+                float cap = (float) maxEdge / (float) longest;
+                targetW = Math.max(1, Math.round(targetW * cap));
+                targetH = Math.max(1, Math.round(targetH * cap));
+            }
+        }
+
+        Bitmap toEncode = bmp;
+        if (targetW != origW || targetH != origH) {
+            toEncode = Bitmap.createScaledBitmap(bmp, targetW, targetH, true);
         }
 
         try {
@@ -479,6 +501,7 @@ public class HermesAccessibilityService extends AccessibilityService {
             resp.put("format", "jpeg");
             resp.put("quality", quality);
             resp.put("scale", scale);
+            resp.put("max_edge", maxEdge);
             resp.put("bytes", jpeg.length);
             if (includeBase64) {
                 resp.put("base64", Base64.encodeToString(jpeg, Base64.NO_WRAP));
@@ -551,12 +574,25 @@ public class HermesAccessibilityService extends AccessibilityService {
         Bitmap bmp = bitmapRef.get();
         if (bmp == null) return null;
 
+        int origW = bmp.getWidth();
+        int origH = bmp.getHeight();
+        int targetW = origW;
+        int targetH = origH;
+        if (s > 0f && s < 0.999f) {
+            targetW = Math.max(1, Math.round(origW * s));
+            targetH = Math.max(1, Math.round(origH * s));
+        }
+        int longest = Math.max(targetW, targetH);
+        if (longest > DEFAULT_MAX_EDGE) {
+            float cap = (float) DEFAULT_MAX_EDGE / (float) longest;
+            targetW = Math.max(1, Math.round(targetW * cap));
+            targetH = Math.max(1, Math.round(targetH * cap));
+        }
+
         Bitmap toEncode = bmp;
         try {
-            if (s > 0f && s < 0.999f) {
-                int sw = Math.max(1, Math.round(bmp.getWidth() * s));
-                int sh = Math.max(1, Math.round(bmp.getHeight() * s));
-                toEncode = Bitmap.createScaledBitmap(bmp, sw, sh, true);
+            if (targetW != origW || targetH != origH) {
+                toEncode = Bitmap.createScaledBitmap(bmp, targetW, targetH, true);
             }
             ByteArrayOutputStream baos = new ByteArrayOutputStream(64 * 1024);
             toEncode.compress(Bitmap.CompressFormat.JPEG, q, baos);

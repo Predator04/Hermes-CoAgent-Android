@@ -3,8 +3,10 @@ package com.hermescoagent.phone;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
@@ -17,20 +19,37 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * Singleton overlay that shows a small "being controlled" pill at the top of
- * the screen while a remote command is actively executing. Auto-hidden for
- * stealth actions (see {@link CommandExecutor}).
+ * Persistent overlay control bar. Shown for the entire lifetime of the
+ * remote-control foreground service so the owner always knows the phone is
+ * being controlled and can kill it instantly via the STOP button. Auto-hidden
+ * for stealth actions (see {@link CommandExecutor}).
+ *
+ * Uses two overlay windows so touches pass through the info pill and only the
+ * STOP button intercepts. Silent no-op when SYSTEM_ALERT_WINDOW is not granted.
  */
 public final class ControlBanner {
 
     private static final ControlBanner INSTANCE = new ControlBanner();
 
+    private static final String COLOR_BG        = "#E60D1117";
+    private static final String COLOR_STROKE    = "#3358A6FF";
+    private static final String COLOR_LABEL     = "#E6EDF3";
+    private static final String COLOR_DOT_IDLE  = "#6E7681";
+    private static final String COLOR_DOT_LIVE  = "#F85149";
+    private static final String COLOR_STOP_BG   = "#F85149";
+    private static final String COLOR_STOP_EDGE = "#33FFFFFF";
+
     private final Handler main = new Handler(Looper.getMainLooper());
-    private View view;
+    private WindowManager wm;
+
+    private View pillView;
+    private View stopView;
     private TextView dotView;
     private ObjectAnimator dotAnim;
-    private WindowManager wm;
+
     private boolean attached;
+    private boolean hiddenForStealth;
+    private boolean active;
 
     private ControlBanner() {}
 
@@ -40,6 +59,15 @@ public final class ControlBanner {
     public static void hide() { INSTANCE.hideInternal(); }
     public static boolean isShowing() { return INSTANCE.attached; }
 
+    /** Flip the dot to red + pulse (during a command) or back to gray (idle). */
+    public static void setActive(boolean on) { INSTANCE.setActiveInternal(on); }
+
+    /** Temporarily hide the bar for a stealth action (photo/mic/stolen). */
+    public static void stealthHide() { INSTANCE.stealthHideInternal(); }
+
+    /** Restore the bar after a stealth action completes. */
+    public static void stealthShow() { INSTANCE.stealthShowInternal(); }
+
     private void showInternal(Context ctx) {
         if (ctx == null) return;
         final Context app = ctx.getApplicationContext();
@@ -47,54 +75,114 @@ public final class ControlBanner {
                 && !Settings.canDrawOverlays(app)) {
             return;
         }
-        main.post(() -> {
-            try {
-                if (attached) return;
-                wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
-                if (wm == null) return;
+        main.post(() -> attachViews(app));
+    }
 
-                view = buildPill(app);
+    private void attachViews(Context app) {
+        try {
+            if (attached) return;
+            wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return;
 
-                int type;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-                } else {
-                    type = WindowManager.LayoutParams.TYPE_PHONE;
-                }
-                WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        type,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                        PixelFormat.TRANSLUCENT);
-                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                lp.y = dp(app, 28);
+            pillView = buildPill(app);
+            stopView = buildStop(app);
 
-                wm.addView(view, lp);
-                attached = true;
-                startPulse();
-            } catch (Throwable ignored) {
-                attached = false;
-                view = null;
-            }
-        });
+            int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : WindowManager.LayoutParams.TYPE_PHONE;
+
+            WindowManager.LayoutParams pillLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            pillLp.gravity = Gravity.TOP | Gravity.START;
+            pillLp.x = dp(app, 12);
+            pillLp.y = dp(app, 28);
+
+            WindowManager.LayoutParams stopLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            stopLp.gravity = Gravity.TOP | Gravity.END;
+            stopLp.x = dp(app, 12);
+            stopLp.y = dp(app, 28);
+
+            wm.addView(pillView, pillLp);
+            wm.addView(stopView, stopLp);
+            attached = true;
+            hiddenForStealth = false;
+            applyActive();
+        } catch (Throwable ignored) {
+            attached = false;
+            pillView = null;
+            stopView = null;
+        }
     }
 
     private void hideInternal() {
-        main.post(() -> {
-            try {
-                if (dotAnim != null) { try { dotAnim.cancel(); } catch (Throwable ignored) {} dotAnim = null; }
-                if (attached && view != null && wm != null) {
-                    try { wm.removeView(view); } catch (Throwable ignored) {}
-                }
-            } finally {
-                attached = false;
-                view = null;
-                dotView = null;
+        main.post(this::detachViews);
+    }
+
+    private void detachViews() {
+        try {
+            cancelPulse();
+            if (attached && wm != null) {
+                if (pillView != null) { try { wm.removeView(pillView); } catch (Throwable ignored) {} }
+                if (stopView != null) { try { wm.removeView(stopView); } catch (Throwable ignored) {} }
             }
+        } finally {
+            attached = false;
+            hiddenForStealth = false;
+            active = false;
+            pillView = null;
+            stopView = null;
+            dotView = null;
+        }
+    }
+
+    private void setActiveInternal(boolean on) {
+        main.post(() -> {
+            active = on;
+            applyActive();
+        });
+    }
+
+    private void applyActive() {
+        if (dotView == null) return;
+        if (active) {
+            dotView.setTextColor(Color.parseColor(COLOR_DOT_LIVE));
+            startPulse();
+        } else {
+            cancelPulse();
+            dotView.setAlpha(1f);
+            dotView.setTextColor(Color.parseColor(COLOR_DOT_IDLE));
+        }
+    }
+
+    private void stealthHideInternal() {
+        main.post(() -> {
+            if (!attached || hiddenForStealth) return;
+            if (pillView != null) pillView.setVisibility(View.GONE);
+            if (stopView != null) stopView.setVisibility(View.GONE);
+            hiddenForStealth = true;
+        });
+    }
+
+    private void stealthShowInternal() {
+        main.post(() -> {
+            if (!attached || !hiddenForStealth) return;
+            if (pillView != null) pillView.setVisibility(View.VISIBLE);
+            if (stopView != null) stopView.setVisibility(View.VISIBLE);
+            hiddenForStealth = false;
         });
     }
 
@@ -102,37 +190,81 @@ public final class ControlBanner {
         LinearLayout pill = new LinearLayout(ctx);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
-        int padH = dp(ctx, 12);
-        int padV = dp(ctx, 6);
+        int padH = dp(ctx, 14);
+        int padV = dp(ctx, 8);
         pill.setPadding(padH, padV, padH, padV);
 
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.RECTANGLE);
-        bg.setColor(Color.parseColor("#CC0D1117"));
-        bg.setCornerRadius(dp(ctx, 20));
-        bg.setStroke(dp(ctx, 1), Color.parseColor("#3358A6FF"));
+        bg.setColor(Color.parseColor(COLOR_BG));
+        bg.setCornerRadius(dp(ctx, 22));
+        bg.setStroke(dp(ctx, 1), Color.parseColor(COLOR_STROKE));
         pill.setBackground(bg);
 
         dotView = new TextView(ctx);
         dotView.setText("●");
-        dotView.setTextColor(Color.parseColor("#F85149"));
-        dotView.setTextSize(10);
+        dotView.setTextColor(Color.parseColor(COLOR_DOT_IDLE));
+        dotView.setTextSize(12);
         LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        dotLp.rightMargin = dp(ctx, 6);
+        dotLp.rightMargin = dp(ctx, 8);
         pill.addView(dotView, dotLp);
 
         TextView label = new TextView(ctx);
         label.setText("Hermes CoAgent");
-        label.setTextColor(Color.parseColor("#E6EDF3"));
-        label.setTextSize(12);
+        label.setTextColor(Color.parseColor(COLOR_LABEL));
+        label.setTextSize(13);
         pill.addView(label);
 
         return pill;
     }
 
+    private View buildStop(Context ctx) {
+        LinearLayout btn = new LinearLayout(ctx);
+        btn.setOrientation(LinearLayout.HORIZONTAL);
+        btn.setGravity(Gravity.CENTER);
+        int padH = dp(ctx, 14);
+        int padV = dp(ctx, 8);
+        btn.setPadding(padH, padV, padH, padV);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setColor(Color.parseColor(COLOR_STOP_BG));
+        bg.setCornerRadius(dp(ctx, 22));
+        bg.setStroke(dp(ctx, 1), Color.parseColor(COLOR_STOP_EDGE));
+        btn.setBackground(bg);
+
+        TextView label = new TextView(ctx);
+        label.setText("■ STOP");
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(13);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.addView(label);
+
+        final Context app = ctx.getApplicationContext();
+        btn.setOnClickListener(v -> emergencyStop(app));
+        return btn;
+    }
+
+    private void emergencyStop(Context app) {
+        // Disable the outbound relay first so a live poll can't hand us a new
+        // command in the moment between stopping the service and the process
+        // being torn down.
+        try {
+            RemoteRelayClient.setEnabled(app, false);
+            try { RemoteRelayClient.get(app).stop(); } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+        try {
+            app.stopService(new Intent(app, RemoteControlService.class));
+        } catch (Throwable ignored) {}
+        // Immediate UI feedback: onDestroy is async.
+        RemoteControlService.isRunning = false;
+        hideInternal();
+    }
+
     private void startPulse() {
+        cancelPulse();
         if (dotView == null) return;
         try {
             dotAnim = ObjectAnimator.ofFloat(dotView, "alpha", 1f, 0.25f);
@@ -141,6 +273,14 @@ public final class ControlBanner {
             dotAnim.setRepeatMode(ValueAnimator.REVERSE);
             dotAnim.start();
         } catch (Throwable ignored) {}
+    }
+
+    private void cancelPulse() {
+        if (dotAnim != null) {
+            try { dotAnim.cancel(); } catch (Throwable ignored) {}
+            dotAnim = null;
+        }
+        if (dotView != null) dotView.setAlpha(1f);
     }
 
     private static int dp(Context ctx, int value) {
