@@ -158,6 +158,24 @@ public final class CommandExecutor {
         return result;
     }
 
+    /**
+     * Stop the whole remote-control service. Scheduled on a background thread
+     * with a short delay so the HTTP response (LAN) or relay result POST can
+     * flush before the process tears down. Mirrors ControlBanner.emergencyStop.
+     */
+    private static void scheduleShutdown(final Context ctx, final JSONObject resp) throws Exception {
+        resp.put("shutting_down", true);
+        new Thread(() -> {
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
+            try {
+                RemoteRelayClient.setEnabled(ctx, false);
+                try { RemoteRelayClient.get(ctx).stop(); } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+            try { ctx.stopService(new Intent(ctx, RemoteControlService.class)); } catch (Throwable ignored) {}
+            RemoteControlService.isRunning = false;
+        }, "hermes-shutdown").start();
+    }
+
     private static JSONObject dispatch(Context ctx, String action, JSONObject req) throws Exception {
         JSONObject resp = new JSONObject();
         resp.put("ok", true);
@@ -165,6 +183,9 @@ public final class CommandExecutor {
         switch (action) {
             case "ping":
                 resp.put("pong", true);
+                break;
+            case "shutdown":
+                scheduleShutdown(ctx, resp);
                 break;
             case "tap": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;

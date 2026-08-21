@@ -72,6 +72,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | Action | Params | What it does |
 |--------|--------|--------------|
 | `ping` | — | Health check → `{"ok":true,"pong":true}` |
+| `shutdown` | — | Stop the remote-control service (LAN/relay). Responds `{"ok":true,"shutting_down":true}` then tears down ~400 ms later |
 | `tap` | `x`, `y` | Tap a screen coordinate |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `duration?` | Swipe between two points |
 | `type` | `text` | Type into the focused field |

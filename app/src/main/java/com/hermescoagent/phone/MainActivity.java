@@ -155,18 +155,22 @@ public class MainActivity extends Activity {
         startServer = new Button(this);
         startServer.setText("2. Start Remote Control");
         startServer.setOnClickListener(v -> {
-            Intent i = new Intent(this, RemoteControlService.class);
-            try {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    startForegroundService(i);
-                } else {
-                    startService(i);
+            if (RemoteControlService.isRunning) {
+                stopRemoteControl();
+            } else {
+                Intent i = new Intent(this, RemoteControlService.class);
+                try {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        startForegroundService(i);
+                    } else {
+                        startService(i);
+                    }
+                    RemoteControlService.isRunning = true; // immediate UI feedback (startForegroundService is async)
+                    Toast.makeText(this, "Remote control started on port " + RemoteControlService.PORT,
+                            Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to start: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
-                RemoteControlService.isRunning = true; // immediate UI feedback (startForegroundService is async)
-                Toast.makeText(this, "Remote control started on port " + RemoteControlService.PORT,
-                        Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                Toast.makeText(this, "Failed to start: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
             updateStatus();
         });
@@ -366,7 +370,7 @@ public class MainActivity extends Activity {
                 "{\"action\":\"key\",\"code\":\"back\"}\n" +
                 "{\"action\":\"launch\",\"package\":\"com.android.settings\"}\n" +
                 "{\"action\":\"screen_size\"}  /  {\"action\":\"list_apps\"}\n" +
-                "{\"action\":\"battery\"}  /  {\"action\":\"info\"}  /  {\"action\":\"ping\"}\n" +
+                "{\"action\":\"battery\"}  /  {\"action\":\"info\"}  /  {\"action\":\"ping\"}  /  {\"action\":\"shutdown\"}\n" +
                 "Find-my-phone: {\"action\":\"ring\"}, {\"action\":\"stop_ring\"},\n" +
                 "  {\"action\":\"location\"}, {\"action\":\"flashlight\",\"on\":true},\n" +
                 "  {\"action\":\"speak\",\"text\":\"hi\"}, {\"action\":\"vibrate\"},\n" +
@@ -1114,6 +1118,19 @@ public class MainActivity extends Activity {
         remoteStatusView.setTextColor(color);
     }
 
+    /** Stop the remote-control service from the main-screen toggle. */
+    private void stopRemoteControl() {
+        try {
+            RemoteRelayClient.setEnabled(this, false);
+            try { RemoteRelayClient.get(this).stop(); } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+        try {
+            stopService(new Intent(this, RemoteControlService.class));
+        } catch (Throwable ignored) {}
+        RemoteControlService.isRunning = false; // immediate UI feedback (onDestroy is async)
+        Toast.makeText(this, "Remote control stopped", Toast.LENGTH_SHORT).show();
+    }
+
     private void updateStatus() {
         String ip = getLocalIp();
         boolean acc = HermesAccessibilityService.instance != null;
@@ -1149,9 +1166,10 @@ public class MainActivity extends Activity {
         }
         if (startServer != null) {
             startServer.setText(running
-                    ? "Running: remote control on :" + RemoteControlService.PORT
+                    ? "■ Stop Remote Control"
                     : "2. Start Remote Control");
-            startServer.setEnabled(!running);
+            startServer.setEnabled(true);
+            styleButton(startServer, running ? BtnStyle.DANGER : BtnStyle.PRIMARY);
         }
         refreshPermissions();
     }
