@@ -156,6 +156,10 @@ public class MainActivity extends Activity {
     private Button grantPermsButton;
     private TextView permsSummaryView;
     private TextView permsHeaderStatusView;
+    private TextView smsStatusView;
+    private Button smsPermBtn;
+    private TextView notifAccessStatusView;
+    private Button notifAccessBtn;
 
     private final List<PermSpec> permSpecs = new ArrayList<>();
 
@@ -315,6 +319,93 @@ public class MainActivity extends Activity {
         batteryNote.setTextColor(COLOR_MUTED);
         batteryNote.setPadding(0, 0, 0, dp(8));
         settingsContent.addView(batteryNote);
+
+        // ─── Text messages (SMS) ──────────────────────────────────────────
+        TextView smsLabel = new TextView(this);
+        smsLabel.setText("Text messages (SMS)");
+        smsLabel.setTextSize(13);
+        smsLabel.setTextColor(COLOR_TEXT);
+        smsLabel.setTypeface(null, Typeface.BOLD);
+        smsLabel.setPadding(0, dp(8), 0, dp(2));
+        settingsContent.addView(smsLabel);
+
+        smsStatusView = new TextView(this);
+        smsStatusView.setTextSize(12);
+        smsStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(smsStatusView);
+
+        smsPermBtn = new Button(this);
+        smsPermBtn.setText("Allow SMS access");
+        smsPermBtn.setOnClickListener(v -> requestSmsPermission());
+        styleButton(smsPermBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams smsBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        smsBtnLp.setMargins(0, dp(8), 0, dp(4));
+        smsPermBtn.setLayoutParams(smsBtnLp);
+        settingsContent.addView(smsPermBtn);
+
+        TextView smsNote = new TextView(this);
+        smsNote.setText("Lets the assistant read texts directly and fetch verification codes "
+                + "without opening the Messages app.");
+        smsNote.setTextSize(11);
+        smsNote.setTextColor(COLOR_MUTED);
+        smsNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(smsNote);
+
+        // ─── Sensitive-content masking ─────────────────────────────────────
+        Switch maskToggle = new Switch(this);
+        maskToggle.setText("  Mask sensitive content");
+        maskToggle.setTextColor(Color.WHITE);
+        maskToggle.setChecked(Redaction.isMaskEnabled(this));
+        LinearLayout.LayoutParams maskLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        maskLp.setMargins(0, dp(4), 0, 0);
+        maskToggle.setLayoutParams(maskLp);
+        settingsContent.addView(maskToggle);
+        maskToggle.setOnCheckedChangeListener((btn, checked) ->
+                Redaction.setMaskEnabled(this, checked));
+
+        TextView maskNote = new TextView(this);
+        maskNote.setText("When on, codes, card numbers and SSNs are hidden (•••) from the "
+                + "assistant. Turn off to let it read codes directly.");
+        maskNote.setTextSize(11);
+        maskNote.setTextColor(COLOR_MUTED);
+        maskNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(maskNote);
+
+        // ─── Notification access ───────────────────────────────────────────
+        TextView notifLabel = new TextView(this);
+        notifLabel.setText("Notification access");
+        notifLabel.setTextSize(13);
+        notifLabel.setTextColor(COLOR_TEXT);
+        notifLabel.setTypeface(null, Typeface.BOLD);
+        notifLabel.setPadding(0, dp(8), 0, dp(2));
+        settingsContent.addView(notifLabel);
+
+        notifAccessStatusView = new TextView(this);
+        notifAccessStatusView.setTextSize(12);
+        notifAccessStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(notifAccessStatusView);
+
+        notifAccessBtn = new Button(this);
+        notifAccessBtn.setText("Open notification settings");
+        notifAccessBtn.setOnClickListener(v -> openNotificationAccessSettings());
+        styleButton(notifAccessBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams notifBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        notifBtnLp.setMargins(0, dp(8), 0, dp(4));
+        notifAccessBtn.setLayoutParams(notifBtnLp);
+        settingsContent.addView(notifAccessBtn);
+
+        TextView notifNote = new TextView(this);
+        notifNote.setText("Lets the assistant read your notification shade (alerts, codes, etc.).");
+        notifNote.setTextSize(11);
+        notifNote.setTextColor(COLOR_MUTED);
+        notifNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(notifNote);
 
         // ─── Connection details (collapsed) ───────────────────────────────
         LinearLayout connDetails = addCollapsibleSection(root, "Connection details", false);
@@ -1208,6 +1299,10 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_RUNTIME_PERMS) {
             refreshPermissions();
+        } else if (requestCode == REQ_SMS) {
+            renderSmsStatus();
+            Toast.makeText(this, isSmsPermissionGranted() ? "SMS access granted" : "SMS access denied",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1372,6 +1467,8 @@ public class MainActivity extends Activity {
         }
         refreshPermissions();
         renderBatteryStatus();
+        renderSmsStatus();
+        renderNotifAccessStatus();
     }
 
     /** True if the OS will not restrict this app's background activity. */
@@ -1403,6 +1500,51 @@ public class MainActivity extends Activity {
         if (batteryExemptBtn != null) {
             batteryExemptBtn.setVisibility(exempt ? View.GONE : View.VISIBLE);
         }
+    }
+
+    // ─── SMS / notification-access settings ──────────────────────────────
+    private static final int REQ_SMS = 5001;
+
+    private boolean isSmsPermissionGranted() {
+        return checkSelfPermission(Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestSmsPermission() {
+        requestPermissions(new String[]{Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS}, REQ_SMS);
+    }
+
+    private void renderSmsStatus() {
+        if (smsStatusView == null) return;
+        boolean granted = isSmsPermissionGranted();
+        smsStatusView.setText(granted ? "SMS access: Allowed" : "SMS access: Not allowed");
+        smsStatusView.setTextColor(granted ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (smsPermBtn != null) smsPermBtn.setVisibility(granted ? View.GONE : View.VISIBLE);
+    }
+
+    private boolean isNotificationAccessEnabled() {
+        try {
+            String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+            return enabled != null && enabled.contains(getPackageName());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void openNotificationAccessSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not open notification settings", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void renderNotifAccessStatus() {
+        if (notifAccessStatusView == null) return;
+        boolean enabled = isNotificationAccessEnabled();
+        notifAccessStatusView.setText(enabled ? "Notification access: Enabled" : "Notification access: Not enabled");
+        notifAccessStatusView.setTextColor(enabled ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (notifAccessBtn != null) notifAccessBtn.setVisibility(enabled ? View.GONE : View.VISIBLE);
     }
 
     /**

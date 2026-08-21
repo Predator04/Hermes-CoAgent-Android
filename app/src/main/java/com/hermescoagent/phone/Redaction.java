@@ -64,9 +64,15 @@ public final class Redaction {
     private static final String PREFS = "hermes_prefs";
     private static final String KEY_SENSITIVE_EXTRA = "sensitive_pkg_extra"; // comma-separated
 
-    /** Redact credentials/OTP/card/SSN in a piece of text. Null → "". */
+    /** Redact credentials/OTP/card/SSN in a piece of text. Null → "". Always masks. */
     public static String redactText(String text) {
+        return redactText(null, text);
+    }
+
+    /** Redact respecting the mask toggle — returns raw text when masking is disabled. */
+    public static String redactText(Context ctx, String text) {
         if (text == null || text.isEmpty()) return text == null ? "" : text;
+        if (ctx != null && !isMaskEnabled(ctx)) return text; // masking disabled
         String s = text;
         s = SSN.matcher(s).replaceAll(MASK);
         s = CARD.matcher(s).replaceAll(MASK);
@@ -122,6 +128,26 @@ public final class Redaction {
         try {
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putBoolean(KEY_PRIVACY, on).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    // ─── Sensitive-content masking toggle ─────────────────────────────────
+    private static final String KEY_MASK = "mask_sensitive";
+
+    /** True (default) when OTP/card/SSN masking is enabled in outgoing text. */
+    public static boolean isMaskEnabled(Context ctx) {
+        try {
+            return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(KEY_MASK, true);
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    public static void setMaskEnabled(Context ctx, boolean on) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_MASK, on).apply();
         } catch (Throwable ignored) {}
     }
 }

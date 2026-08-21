@@ -93,8 +93,8 @@ public class HermesNotificationListener extends NotificationListenerService {
                     o.put("text", Redaction.MASK);
                     o.put("redacted", true);
                 } else {
-                    o.put("title", Redaction.redactText(title));
-                    o.put("text", Redaction.redactText(text));
+                    o.put("title", Redaction.redactText(ctx, title));
+                    o.put("text", Redaction.redactText(ctx, text));
                 }
                 out.put(o);
             } catch (Throwable ignored) {}

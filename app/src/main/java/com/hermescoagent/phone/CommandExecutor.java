@@ -20,6 +20,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.database.Cursor;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.location.Location;
@@ -42,6 +43,7 @@ import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.provider.Telephony;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -57,6 +59,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -277,7 +281,7 @@ public final class CommandExecutor {
                     else {
                         String pkg = s.getForegroundPackage();
                         boolean sensitive = Redaction.isSensitivePackage(ctx, pkg);
-                        redactNodes(nodes, sensitive);
+                        redactNodes(ctx, nodes, sensitive);
                         resp.put("nodes", nodes);
                         resp.put("count", nodes.length());
                         resp.put("package", pkg);
@@ -316,6 +320,12 @@ public final class CommandExecutor {
                 }
                 break;
             }
+            case "sms":
+                readSms(ctx, req, resp);
+                break;
+            case "latest_code":
+                latestCode(ctx, resp);
+                break;
             case "dismiss_notification": {
                 HermesNotificationListener nl = HermesNotificationListener.instance;
                 if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); break; }
@@ -1209,7 +1219,7 @@ public final class CommandExecutor {
                     String d = n.optString("desc", "");
                     String pick = !t.isEmpty() ? t : d;
                     if (pick.isEmpty()) continue;
-                    digest.put(sensitive ? Redaction.MASK : Redaction.redactText(pick));
+                    digest.put(sensitive ? Redaction.MASK : Redaction.redactText(ctx, pick));
                 }
                 resp.put("digest", digest);
             } else {
@@ -1478,6 +1488,98 @@ public final class CommandExecutor {
         } catch (Exception ignored) {}
     }
 
+    // ─────────────────────────── sms / latest_code ───────────────────────
+
+    private static void readSms(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            resp.put("ok", false);
+            resp.put("error", "READ_SMS permission not granted");
+            return;
+        }
+        int count = req.optInt("count", 20);
+        if (count < 1) count = 20;
+        if (count > 100) count = 100;
+        Cursor c = null;
+        try {
+            c = ctx.getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI, null, null, null, "date DESC");
+            if (c == null) { resp.put("ok", false); resp.put("error", "no sms provider"); return; }
+            JSONArray out = new JSONArray();
+            int n = 0;
+            while (c.moveToNext() && n < count) {
+                try {
+                    JSONObject o = new JSONObject();
+                    o.put("address", c.getString(c.getColumnIndexOrThrow("address")));
+                    o.put("body", c.getString(c.getColumnIndexOrThrow("body")));
+                    o.put("date", c.getLong(c.getColumnIndexOrThrow("date")));
+                    out.put(o);
+                    n++;
+                } catch (Throwable ignored) {}
+            }
+            resp.put("ok", true);
+            resp.put("messages", out);
+            resp.put("count", out.length());
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", String.valueOf(t));
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void latestCode(Context ctx, JSONObject resp) throws Exception {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            resp.put("ok", false);
+            resp.put("error", "READ_SMS permission not granted");
+            return;
+        }
+        Pattern code = Pattern.compile("\\b\\d{4,8}\\b");
+        Pattern kw = Pattern.compile("(?i)code|verify|otp|one-?time|login|sign|access|security|authenticat|passcode");
+        Cursor c = null;
+        try {
+            c = ctx.getContentResolver().query(Telephony.Sms.Inbox.CONTENT_URI, null, null, null, "date DESC");
+            if (c == null) { resp.put("ok", false); resp.put("error", "no sms provider"); return; }
+            String fallbackCode = null, fallbackAddr = null, fallbackBody = null;
+            long fallbackDate = 0;
+            while (c.moveToNext()) {
+                String addr = c.getString(c.getColumnIndexOrThrow("address"));
+                String body = c.getString(c.getColumnIndexOrThrow("body"));
+                long date = c.getLong(c.getColumnIndexOrThrow("date"));
+                if (body == null || body.isEmpty()) continue;
+                Matcher m = code.matcher(body);
+                if (!m.find()) continue;
+                String cd = m.group();
+                if (kw.matcher(body).find()) {
+                    resp.put("ok", true);
+                    resp.put("code", cd);
+                    resp.put("address", addr == null ? "" : addr);
+                    resp.put("body", body);
+                    resp.put("date", date);
+                    resp.put("keyword_match", true);
+                    return;
+                }
+                if (fallbackCode == null) {
+                    fallbackCode = cd; fallbackAddr = addr; fallbackBody = body; fallbackDate = date;
+                }
+            }
+            if (fallbackCode != null) {
+                resp.put("ok", true);
+                resp.put("code", fallbackCode);
+                resp.put("address", fallbackAddr == null ? "" : fallbackAddr);
+                resp.put("body", fallbackBody);
+                resp.put("date", fallbackDate);
+                resp.put("keyword_match", false);
+            } else {
+                resp.put("ok", false);
+                resp.put("error", "no code found in recent SMS");
+            }
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", String.valueOf(t));
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
     // ─────────────────────── privacy / redaction helpers ─────────────────
 
     private static JSONObject privacyRefusal() throws Exception {
@@ -1487,7 +1589,7 @@ public final class CommandExecutor {
                 .put("privacy", true);
     }
 
-    private static void redactNodes(JSONArray nodes, boolean sensitive) {
+    private static void redactNodes(Context ctx, JSONArray nodes, boolean sensitive) {
         if (nodes == null) return;
         for (int i = 0; i < nodes.length(); i++) {
             JSONObject n = nodes.optJSONObject(i);
@@ -1499,8 +1601,8 @@ public final class CommandExecutor {
                     if (!t.isEmpty()) n.put("text", Redaction.MASK);
                     if (!d.isEmpty()) n.put("desc", Redaction.MASK);
                 } else {
-                    if (!t.isEmpty()) n.put("text", Redaction.redactText(t));
-                    if (!d.isEmpty()) n.put("desc", Redaction.redactText(d));
+                    if (!t.isEmpty()) n.put("text", Redaction.redactText(ctx, t));
+                    if (!d.isEmpty()) n.put("desc", Redaction.redactText(ctx, d));
                 }
             } catch (Exception ignored) {}
         }
