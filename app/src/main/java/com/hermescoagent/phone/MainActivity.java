@@ -38,7 +38,25 @@ import java.util.List;
 
 public class MainActivity extends Activity {
 
-    private TextView statusView;
+    // GitHub-dark palette
+    private static final int COLOR_BG          = 0xFF0D1117;
+    private static final int COLOR_CARD        = 0xFF161B22;
+    private static final int COLOR_BORDER      = 0xFF30363D;
+    private static final int COLOR_TEXT        = 0xFFE6EDF3;
+    private static final int COLOR_MUTED       = 0xFF8B949E;
+    private static final int COLOR_ACCENT      = 0xFF58A6FF;
+    private static final int COLOR_GREEN       = 0xFF3FB950;
+    private static final int COLOR_GREEN_SOFT  = 0xFF7EE787;
+    private static final int COLOR_AMBER       = 0xFFD29922;
+    private static final int COLOR_AMBER_SOFT  = 0xFFF0B72F;
+    private static final int COLOR_RED         = 0xFFF85149;
+    private static final int COLOR_HINT        = 0xFF6E7681;
+
+    private enum BtnStyle { PRIMARY, SECONDARY, DANGER, GHOST }
+
+    private TextView statusView;      // "● Running — port 8765" / "○ Stopped"
+    private TextView statusIpView;
+    private TextView statusAccView;
     private TextView tokenView;
     private TextView deviceIdView;
     private TextView remoteStatusView;
@@ -61,96 +79,66 @@ public class MainActivity extends Activity {
         CommandExecutor.restoreCrashedRingState(this);
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#0D1117"));
+        scroll.setBackgroundColor(COLOR_BG);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(48, 72, 48, 48);
+        root.setPadding(dp(20), dp(28), dp(20), dp(28));
 
+        // ─── Title ────────────────────────────────────────────────────────
         TextView title = new TextView(this);
         title.setText("Hermes CoAgent");
-        title.setTextSize(26);
+        title.setTextSize(24);
         title.setTextColor(Color.WHITE);
         title.setTypeface(null, Typeface.BOLD);
         root.addView(title);
 
         TextView sub = new TextView(this);
         sub.setText("Lets your Hermes assistant control this phone like a computer.");
-        sub.setTextSize(14);
-        sub.setTextColor(Color.parseColor("#8B949E"));
-        sub.setPadding(0, 8, 0, 24);
+        sub.setTextSize(13);
+        sub.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        subLp.setMargins(0, dp(4), 0, dp(20));
+        sub.setLayoutParams(subLp);
         root.addView(sub);
 
+        // ─── Master status card ───────────────────────────────────────────
+        LinearLayout statusCard = newCard(dp(16));
+
         statusView = new TextView(this);
-        statusView.setTextSize(15);
-        statusView.setTextColor(Color.parseColor("#58A6FF"));
-        statusView.setTypeface(Typeface.MONOSPACE);
-        statusView.setPadding(0, 0, 0, 16);
-        root.addView(statusView);
+        statusView.setTextSize(16);
+        statusView.setTypeface(null, Typeface.BOLD);
+        statusCard.addView(statusView);
 
-        TextView tokenLabel = new TextView(this);
-        tokenLabel.setText("Auth token (send as X-Hermes-Token header):");
-        tokenLabel.setTextSize(12);
-        tokenLabel.setTextColor(Color.parseColor("#8B949E"));
-        tokenLabel.setPadding(0, 8, 0, 4);
-        root.addView(tokenLabel);
+        statusIpView = new TextView(this);
+        statusIpView.setTextSize(12);
+        statusIpView.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams ipLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        ipLp.setMargins(0, dp(6), 0, 0);
+        statusIpView.setLayoutParams(ipLp);
+        statusCard.addView(statusIpView);
 
-        tokenView = new TextView(this);
-        tokenView.setTextSize(12);
-        tokenView.setTextColor(Color.parseColor("#7EE787"));
-        tokenView.setTypeface(Typeface.MONOSPACE);
-        tokenView.setPadding(16, 12, 16, 12);
-        tokenView.setBackgroundColor(Color.parseColor("#161B22"));
-        tokenView.setGravity(Gravity.START);
-        tokenView.setTextIsSelectable(true);
-        root.addView(tokenView);
+        statusAccView = new TextView(this);
+        statusAccView.setTextSize(12);
+        LinearLayout.LayoutParams accLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        accLp.setMargins(0, dp(2), 0, 0);
+        statusAccView.setLayoutParams(accLp);
+        statusCard.addView(statusAccView);
 
-        Button copyToken = new Button(this);
-        copyToken.setText("Copy token to clipboard");
-        copyToken.setOnClickListener(v -> {
-            String t = RemoteControlService.ensureToken(MainActivity.this);
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("Hermes token", t));
-                Toast.makeText(MainActivity.this, "Token copied", Toast.LENGTH_SHORT).show();
-            }
-        });
-        root.addView(copyToken);
+        root.addView(statusCard);
 
-        TextView deviceIdLabel = new TextView(this);
-        deviceIdLabel.setText("Relay device_id (required by relay /command):");
-        deviceIdLabel.setTextSize(12);
-        deviceIdLabel.setTextColor(Color.parseColor("#8B949E"));
-        deviceIdLabel.setPadding(0, 16, 0, 4);
-        root.addView(deviceIdLabel);
-
-        deviceIdView = new TextView(this);
-        deviceIdView.setTextSize(12);
-        deviceIdView.setTextColor(Color.parseColor("#7EE787"));
-        deviceIdView.setTypeface(Typeface.MONOSPACE);
-        deviceIdView.setPadding(16, 12, 16, 12);
-        deviceIdView.setBackgroundColor(Color.parseColor("#161B22"));
-        deviceIdView.setGravity(Gravity.START);
-        deviceIdView.setTextIsSelectable(true);
-        deviceIdView.setText(RemoteRelayClient.ensureDeviceId(this));
-        root.addView(deviceIdView);
-
-        Button copyDeviceId = new Button(this);
-        copyDeviceId.setText("Copy device_id to clipboard");
-        copyDeviceId.setOnClickListener(v -> {
-            String id = RemoteRelayClient.ensureDeviceId(MainActivity.this);
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("Hermes device_id", id));
-                Toast.makeText(MainActivity.this, "device_id copied", Toast.LENGTH_SHORT).show();
-            }
-        });
-        root.addView(copyDeviceId);
-
+        // ─── Primary actions (Enable Accessibility / Start Remote) ────────
         grantAccessibility = new Button(this);
         grantAccessibility.setText("1. Enable Accessibility (required)");
         grantAccessibility.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        styleButton(grantAccessibility, BtnStyle.PRIMARY);
         root.addView(grantAccessibility);
 
         startServer = new Button(this);
@@ -171,40 +159,105 @@ public class MainActivity extends Activity {
             }
             updateStatus();
         });
+        styleButton(startServer, BtnStyle.PRIMARY);
         root.addView(startServer);
 
-        // ─── Remote Mode section ─────────────────────────────────────────
-        TextView remoteHeader = new TextView(this);
-        remoteHeader.setText("Remote Mode (works over cellular)");
-        remoteHeader.setTextSize(16);
-        remoteHeader.setTextColor(Color.WHITE);
-        remoteHeader.setTypeface(null, Typeface.BOLD);
-        remoteHeader.setPadding(0, 32, 0, 8);
-        root.addView(remoteHeader);
+        // ─── Connection details (collapsed) ───────────────────────────────
+        LinearLayout connDetails = addCollapsibleSection(root, "Connection details", false);
+
+        TextView tokenLabel = new TextView(this);
+        tokenLabel.setText("Auth token (send as X-Hermes-Token header):");
+        tokenLabel.setTextSize(12);
+        tokenLabel.setTextColor(COLOR_MUTED);
+        tokenLabel.setPadding(0, 0, 0, dp(4));
+        connDetails.addView(tokenLabel);
+
+        tokenView = new TextView(this);
+        tokenView.setTextSize(12);
+        tokenView.setTextColor(COLOR_GREEN_SOFT);
+        tokenView.setTypeface(Typeface.MONOSPACE);
+        tokenView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        tokenView.setBackgroundResource(R.drawable.bg_code_block);
+        tokenView.setGravity(Gravity.START);
+        tokenView.setTextIsSelectable(true);
+        connDetails.addView(tokenView);
+
+        Button copyToken = new Button(this);
+        copyToken.setText("Copy token");
+        copyToken.setOnClickListener(v -> {
+            String t = RemoteControlService.ensureToken(MainActivity.this);
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("Hermes token", t));
+                Toast.makeText(MainActivity.this, "Token copied", Toast.LENGTH_SHORT).show();
+            }
+        });
+        styleButton(copyToken, BtnStyle.SECONDARY);
+        connDetails.addView(copyToken);
+
+        TextView deviceIdLabel = new TextView(this);
+        deviceIdLabel.setText("Relay device_id (required by relay /command):");
+        deviceIdLabel.setTextSize(12);
+        deviceIdLabel.setTextColor(COLOR_MUTED);
+        deviceIdLabel.setPadding(0, dp(16), 0, dp(4));
+        connDetails.addView(deviceIdLabel);
+
+        deviceIdView = new TextView(this);
+        deviceIdView.setTextSize(12);
+        deviceIdView.setTextColor(COLOR_GREEN_SOFT);
+        deviceIdView.setTypeface(Typeface.MONOSPACE);
+        deviceIdView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        deviceIdView.setBackgroundResource(R.drawable.bg_code_block);
+        deviceIdView.setGravity(Gravity.START);
+        deviceIdView.setTextIsSelectable(true);
+        deviceIdView.setText(RemoteRelayClient.ensureDeviceId(this));
+        connDetails.addView(deviceIdView);
+
+        Button copyDeviceId = new Button(this);
+        copyDeviceId.setText("Copy device_id");
+        copyDeviceId.setOnClickListener(v -> {
+            String id = RemoteRelayClient.ensureDeviceId(MainActivity.this);
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("Hermes device_id", id));
+                Toast.makeText(MainActivity.this, "device_id copied", Toast.LENGTH_SHORT).show();
+            }
+        });
+        styleButton(copyDeviceId, BtnStyle.SECONDARY);
+        connDetails.addView(copyDeviceId);
+
+        // ─── Remote Mode ──────────────────────────────────────────────────
+        addSectionHeader(root, "Remote Mode");
 
         TextView remoteHelp = new TextView(this);
         remoteHelp.setText("Dial out to a relay server so the controller can reach this phone " +
                 "even when carrier NAT blocks incoming connections. Uses the same auth token.");
         remoteHelp.setTextSize(12);
-        remoteHelp.setTextColor(Color.parseColor("#8B949E"));
-        remoteHelp.setPadding(0, 0, 0, 8);
+        remoteHelp.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams remoteHelpLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        remoteHelpLp.setMargins(0, 0, 0, dp(8));
+        remoteHelp.setLayoutParams(remoteHelpLp);
         root.addView(remoteHelp);
 
         TextView relayLabel = new TextView(this);
         relayLabel.setText("Relay base URL (e.g. https://your-relay.example.com):");
         relayLabel.setTextSize(12);
-        relayLabel.setTextColor(Color.parseColor("#8B949E"));
-        relayLabel.setPadding(0, 8, 0, 4);
+        relayLabel.setTextColor(COLOR_MUTED);
+        relayLabel.setPadding(0, dp(4), 0, dp(4));
         root.addView(relayLabel);
 
         relayUrlField = new EditText(this);
         relayUrlField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         relayUrlField.setSingleLine(true);
-        relayUrlField.setTextSize(12);
+        relayUrlField.setTextSize(13);
         relayUrlField.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        relayUrlField.setTextColor(Color.WHITE);
-        relayUrlField.setHintTextColor(Color.parseColor("#6E7681"));
+        relayUrlField.setTextColor(COLOR_TEXT);
+        relayUrlField.setHintTextColor(COLOR_HINT);
         relayUrlField.setHint("https://…");
+        relayUrlField.setBackgroundResource(R.drawable.bg_edit_text);
+        relayUrlField.setPadding(dp(12), dp(10), dp(12), dp(10));
         relayUrlField.setText(RemoteRelayClient.getRelayUrl(this));
         root.addView(relayUrlField);
 
@@ -212,14 +265,18 @@ public class MainActivity extends Activity {
         remoteToggle.setText("  Enable Remote Mode");
         remoteToggle.setTextColor(Color.WHITE);
         remoteToggle.setChecked(RemoteRelayClient.isEnabled(this));
-        remoteToggle.setPadding(0, 16, 0, 8);
+        LinearLayout.LayoutParams remoteToggleLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        remoteToggleLp.setMargins(0, dp(12), 0, dp(4));
+        remoteToggle.setLayoutParams(remoteToggleLp);
         root.addView(remoteToggle);
 
         remoteStatusView = new TextView(this);
-        remoteStatusView.setTextSize(13);
+        remoteStatusView.setTextSize(12);
         remoteStatusView.setTypeface(Typeface.MONOSPACE);
-        remoteStatusView.setTextColor(Color.parseColor("#8B949E"));
-        remoteStatusView.setPadding(0, 0, 0, 8);
+        remoteStatusView.setTextColor(COLOR_MUTED);
+        remoteStatusView.setPadding(0, 0, 0, dp(8));
         root.addView(remoteStatusView);
 
         remoteToggle.setOnCheckedChangeListener((btn, checked) -> {
@@ -250,13 +307,19 @@ public class MainActivity extends Activity {
             renderRemoteStatus(RemoteRelayClient.Status.OFF, "");
         }
 
+        // ─── Permissions ──────────────────────────────────────────────────
         initPermissionsSection(root);
 
+        // ─── Privacy toggle ───────────────────────────────────────────────
         Switch privacyToggle = new Switch(this);
         privacyToggle.setText("  Privacy mode (block screenshot/dump/snapshot/notifications)");
         privacyToggle.setTextColor(Color.WHITE);
         privacyToggle.setChecked(Redaction.isPrivacyOn(this));
-        privacyToggle.setPadding(0, 24, 0, 8);
+        LinearLayout.LayoutParams privacyLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        privacyLp.setMargins(0, dp(20), 0, dp(4));
+        privacyToggle.setLayoutParams(privacyLp);
         privacyToggle.setOnCheckedChangeListener((btn, checked) -> {
             Redaction.setPrivacyOn(this, checked);
             Toast.makeText(this, checked ? "Privacy mode ON" : "Privacy mode OFF",
@@ -264,6 +327,7 @@ public class MainActivity extends Activity {
         });
         root.addView(privacyToggle);
 
+        // ─── Check for updates ────────────────────────────────────────────
         Button checkUpdates = new Button(this);
         checkUpdates.setText("Check for updates");
         checkUpdates.setOnClickListener(v -> {
@@ -276,7 +340,11 @@ public class MainActivity extends Activity {
                 }
             });
         });
+        styleButton(checkUpdates, BtnStyle.SECONDARY);
         root.addView(checkUpdates);
+
+        // ─── Command reference (collapsed) ────────────────────────────────
+        LinearLayout cmdRef = addCollapsibleSection(root, "Command reference", false);
 
         TextView note = new TextView(this);
         note.setText("Commands are sent to http://<this-ip>:8765/cmd as JSON with the\n" +
@@ -303,9 +371,9 @@ public class MainActivity extends Activity {
                 "  {\"action\":\"tracking\",\"on\":true|false}, {\"action\":\"location_history\"},\n" +
                 "  {\"action\":\"sim\"}, {\"action\":\"sim_events\"}");
         note.setTextSize(12);
-        note.setTextColor(Color.parseColor("#8B949E"));
-        note.setPadding(0, 20, 0, 0);
-        root.addView(note);
+        note.setTextColor(COLOR_MUTED);
+        note.setTypeface(Typeface.MONOSPACE);
+        cmdRef.addView(note);
 
         scroll.addView(root);
         setContentView(scroll);
@@ -314,6 +382,127 @@ public class MainActivity extends Activity {
         UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl) -> {
             if (available) showUpdateDialog(code, name1, apkUrl);
         });
+    }
+
+    // ─────────────────────────── UI helpers ─────────────────────────────
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private LinearLayout newCard(int bottomMargin) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, bottomMargin);
+        card.setLayoutParams(lp);
+        return card;
+    }
+
+    private TextView addSectionHeader(LinearLayout parent, String text) {
+        TextView h = new TextView(this);
+        h.setText(text);
+        h.setTextSize(16);
+        h.setTextColor(COLOR_TEXT);
+        h.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(24), 0, dp(8));
+        h.setLayoutParams(lp);
+        parent.addView(h);
+        return h;
+    }
+
+    private LinearLayout addCollapsibleSection(LinearLayout parent, String title, boolean initiallyExpanded) {
+        LinearLayout sectionCard = new LinearLayout(this);
+        sectionCard.setOrientation(LinearLayout.VERTICAL);
+        sectionCard.setBackgroundResource(R.drawable.bg_card);
+        LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        sectionLp.setMargins(0, dp(12), 0, 0);
+        sectionCard.setLayoutParams(sectionLp);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(14), dp(12), dp(14), dp(12));
+        header.setClickable(true);
+        header.setFocusable(true);
+
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextColor(COLOR_TEXT);
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(titleView);
+
+        TextView chevron = new TextView(this);
+        chevron.setTextColor(COLOR_MUTED);
+        chevron.setTextSize(14);
+        chevron.setText(initiallyExpanded ? "▾" : "▸");
+        header.addView(chevron);
+
+        sectionCard.addView(header);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), 0, dp(14), dp(14));
+        content.setVisibility(initiallyExpanded ? View.VISIBLE : View.GONE);
+        sectionCard.addView(content);
+
+        header.setOnClickListener(v -> {
+            boolean expanded = content.getVisibility() == View.VISIBLE;
+            content.setVisibility(expanded ? View.GONE : View.VISIBLE);
+            chevron.setText(expanded ? "▸" : "▾");
+        });
+
+        parent.addView(sectionCard);
+        return content;
+    }
+
+    private void styleButton(Button b, BtnStyle style) {
+        int bg;
+        int textColor;
+        switch (style) {
+            case PRIMARY:
+                bg = R.drawable.bg_button_primary;
+                textColor = Color.WHITE;
+                break;
+            case DANGER:
+                bg = R.drawable.bg_button_danger;
+                textColor = Color.WHITE;
+                break;
+            case GHOST:
+                bg = R.drawable.bg_button_ghost;
+                textColor = COLOR_MUTED;
+                break;
+            case SECONDARY:
+            default:
+                bg = R.drawable.bg_button_secondary;
+                textColor = COLOR_TEXT;
+                break;
+        }
+        b.setBackgroundResource(bg);
+        b.setTextColor(textColor);
+        b.setAllCaps(false);
+        b.setTypeface(null, Typeface.BOLD);
+        b.setTextSize(14);
+        b.setPadding(dp(16), dp(10), dp(16), dp(10));
+        b.setStateListAnimator(null);
+        b.setElevation(0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(10), 0, 0);
+        b.setLayoutParams(lp);
     }
 
     // ─────────────────────────── permissions UI ─────────────────────────
@@ -355,7 +544,7 @@ public class MainActivity extends Activity {
                 checkbox.setChecked(false);
                 checkbox.setEnabled(false);
                 statusText.setText("Not needed on this Android version.");
-                statusText.setTextColor(Color.parseColor("#8B949E"));
+                statusText.setTextColor(COLOR_MUTED);
                 if (openSettings != null) openSettings.setVisibility(View.GONE);
                 return;
             }
@@ -365,49 +554,49 @@ public class MainActivity extends Activity {
             checkbox.setChecked(wants);
             if (granted) {
                 statusText.setText("Granted");
-                statusText.setTextColor(Color.parseColor("#7EE787"));
+                statusText.setTextColor(COLOR_GREEN_SOFT);
             } else if (wants) {
                 statusText.setText(isRuntime() && !isComplex()
                         ? "Not granted — tap Grant permissions"
                         : "Not granted — tap Open Settings");
-                statusText.setTextColor(Color.parseColor("#F0B72F"));
+                statusText.setTextColor(COLOR_AMBER_SOFT);
             } else {
                 statusText.setText("Off (feature disabled)");
-                statusText.setTextColor(Color.parseColor("#8B949E"));
+                statusText.setTextColor(COLOR_MUTED);
             }
             if (openSettings != null) openSettings.setVisibility(View.VISIBLE);
         }
     }
 
     private void initPermissionsSection(LinearLayout root) {
-        TextView header = new TextView(this);
-        header.setText("Permissions");
-        header.setTextSize(16);
-        header.setTextColor(Color.WHITE);
-        header.setTypeface(null, Typeface.BOLD);
-        header.setPadding(0, 32, 0, 4);
-        root.addView(header);
+        addSectionHeader(root, "Permissions");
 
         TextView subtitle = new TextView(this);
         subtitle.setText("Check the features you want. Tap ? for the reason. "
                 + "Permissions Android grants through Settings show an Open Settings button.");
         subtitle.setTextSize(12);
-        subtitle.setTextColor(Color.parseColor("#8B949E"));
-        subtitle.setPadding(0, 0, 0, 12);
+        subtitle.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        subLp.setMargins(0, 0, 0, dp(10));
+        subtitle.setLayoutParams(subLp);
         root.addView(subtitle);
 
         permsSummaryView = new TextView(this);
         permsSummaryView.setTextSize(13);
-        permsSummaryView.setPadding(0, 0, 0, 12);
+        permsSummaryView.setTypeface(null, Typeface.BOLD);
         LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
+        summaryLp.setMargins(0, 0, 0, dp(4));
         permsSummaryView.setLayoutParams(summaryLp);
         root.addView(permsSummaryView);
 
         grantPermsButton = new Button(this);
         grantPermsButton.setText("Grant permissions");
         grantPermsButton.setOnClickListener(v -> onGrantAllClicked());
+        styleButton(grantPermsButton, BtnStyle.PRIMARY);
         root.addView(grantPermsButton);
 
         addPermRow(root, new PermSpec(
@@ -533,13 +722,13 @@ public class MainActivity extends Activity {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(16, 16, 16, 16);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardLp.setMargins(0, 12, 0, 0);
+        cardLp.setMargins(0, dp(10), 0, 0);
         card.setLayoutParams(cardLp);
-        card.setBackgroundColor(Color.parseColor("#161B22"));
+        card.setBackgroundResource(R.drawable.bg_card);
 
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -548,7 +737,7 @@ public class MainActivity extends Activity {
         spec.checkbox = new CheckBox(this);
         spec.checkbox.setText(spec.label);
         spec.checkbox.setTextColor(Color.WHITE);
-        spec.checkbox.setTextSize(15);
+        spec.checkbox.setTextSize(14);
         LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         spec.checkbox.setLayoutParams(cbLp);
@@ -561,9 +750,21 @@ public class MainActivity extends Activity {
 
         Button whyBtn = new Button(this);
         whyBtn.setText("?");
+        whyBtn.setBackgroundResource(R.drawable.bg_button_ghost);
+        whyBtn.setTextColor(COLOR_MUTED);
+        whyBtn.setTypeface(null, Typeface.BOLD);
+        whyBtn.setTextSize(14);
+        whyBtn.setAllCaps(false);
         whyBtn.setMinWidth(0);
         whyBtn.setMinimumWidth(0);
-        whyBtn.setPadding(24, 0, 24, 0);
+        whyBtn.setPadding(dp(14), dp(4), dp(14), dp(4));
+        whyBtn.setStateListAnimator(null);
+        whyBtn.setElevation(0);
+        LinearLayout.LayoutParams whyLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        whyLp.setMargins(dp(8), 0, 0, 0);
+        whyBtn.setLayoutParams(whyLp);
         whyBtn.setOnClickListener(v -> showWhyDialog(spec));
         headerRow.addView(whyBtn);
 
@@ -571,7 +772,7 @@ public class MainActivity extends Activity {
 
         spec.statusText = new TextView(this);
         spec.statusText.setTextSize(12);
-        spec.statusText.setPadding(0, 4, 0, 4);
+        spec.statusText.setPadding(0, dp(4), 0, dp(4));
         card.addView(spec.statusText);
 
         if (spec.howToSteps != null) {
@@ -584,7 +785,7 @@ public class MainActivity extends Activity {
             steps.setText(sb.toString());
             steps.setTextSize(12);
             steps.setTextColor(Color.parseColor("#C9D1D9"));
-            steps.setPadding(0, 4, 0, 4);
+            steps.setPadding(0, dp(4), 0, dp(4));
             card.addView(steps);
         }
 
@@ -592,6 +793,7 @@ public class MainActivity extends Activity {
             spec.openSettings = new Button(this);
             spec.openSettings.setText("Open Settings");
             spec.openSettings.setOnClickListener(v -> openSettingsFor(spec));
+            styleButton(spec.openSettings, BtnStyle.SECONDARY);
             card.addView(spec.openSettings);
         }
 
@@ -705,10 +907,10 @@ public class MainActivity extends Activity {
         if (permsSummaryView != null) {
             if (applicable == 0) {
                 permsSummaryView.setText("No permissions required");
-                permsSummaryView.setTextColor(Color.parseColor("#8B949E"));
+                permsSummaryView.setTextColor(COLOR_MUTED);
             } else if (missingLabels.isEmpty()) {
                 permsSummaryView.setText("✅ All permissions granted");
-                permsSummaryView.setTextColor(Color.parseColor("#3FB950"));
+                permsSummaryView.setTextColor(COLOR_GREEN);
             } else {
                 int n = missingLabels.size();
                 StringBuilder sb = new StringBuilder("⚠️ ");
@@ -718,7 +920,7 @@ public class MainActivity extends Activity {
                     sb.append(missingLabels.get(i));
                 }
                 permsSummaryView.setText(sb.toString());
-                permsSummaryView.setTextColor(Color.parseColor("#D29922"));
+                permsSummaryView.setTextColor(COLOR_AMBER);
             }
         }
     }
@@ -753,20 +955,20 @@ public class MainActivity extends Activity {
         switch (s) {
             case CONNECTED:
                 text = "remote: connected" + (detail == null || detail.isEmpty() ? "" : " → " + detail);
-                color = Color.parseColor("#7EE787");
+                color = COLOR_GREEN_SOFT;
                 break;
             case CONNECTING:
                 text = "remote: connecting" + (detail == null || detail.isEmpty() ? "" : " → " + detail);
-                color = Color.parseColor("#F0B72F");
+                color = COLOR_AMBER_SOFT;
                 break;
             case ERROR:
                 text = "remote: error" + (detail == null || detail.isEmpty() ? "" : " (" + detail + ")");
-                color = Color.parseColor("#F85149");
+                color = COLOR_RED;
                 break;
             case OFF:
             default:
                 text = "remote: off";
-                color = Color.parseColor("#8B949E");
+                color = COLOR_MUTED;
                 break;
         }
         remoteStatusView.setText(text);
@@ -776,14 +978,37 @@ public class MainActivity extends Activity {
     private void updateStatus() {
         String ip = getLocalIp();
         boolean acc = HermesAccessibilityService.instance != null;
-        statusView.setText("IP: " + ip + "\nPort: " + RemoteControlService.PORT +
-                "\nAccessibility: " + (acc ? "ENABLED" : "NOT ENABLED"));
-        tokenView.setText(RemoteControlService.ensureToken(this));
+        boolean running = RemoteControlService.isRunning;
+
+        if (statusView != null) {
+            if (running) {
+                statusView.setText("● Running — port " + RemoteControlService.PORT);
+                statusView.setTextColor(COLOR_GREEN);
+            } else {
+                statusView.setText("○ Stopped");
+                statusView.setTextColor(COLOR_MUTED);
+            }
+        }
+        if (statusIpView != null) {
+            statusIpView.setText("IP: " + ip);
+        }
+        if (statusAccView != null) {
+            if (acc) {
+                statusAccView.setText("Accessibility: Enabled");
+                statusAccView.setTextColor(COLOR_GREEN_SOFT);
+            } else {
+                statusAccView.setText("Accessibility: Not enabled");
+                statusAccView.setTextColor(COLOR_MUTED);
+            }
+        }
+
+        if (tokenView != null) {
+            tokenView.setText(RemoteControlService.ensureToken(this));
+        }
         if (grantAccessibility != null) {
             grantAccessibility.setVisibility(acc ? View.GONE : View.VISIBLE);
         }
         if (startServer != null) {
-            boolean running = RemoteControlService.isRunning;
             startServer.setText(running
                     ? "Running: remote control on :" + RemoteControlService.PORT
                     : "2. Start Remote Control");
