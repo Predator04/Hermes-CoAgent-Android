@@ -623,6 +623,19 @@ public class MainActivity extends Activity {
             }
         }
 
+        // ─── Version footer ────────────────────────────────────────────────
+        TextView versionFooter = new TextView(this);
+        versionFooter.setText("v" + BuildConfig.VERSION_NAME + "  ·  build " + BuildConfig.VERSION_CODE);
+        versionFooter.setTextSize(11);
+        versionFooter.setTextColor(COLOR_MUTED);
+        versionFooter.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams vfLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        vfLp.setMargins(0, dp(24), 0, dp(8));
+        versionFooter.setLayoutParams(vfLp);
+        root.addView(versionFooter);
+
         scroll.addView(root);
         setContentView(scroll);
         updateStatus();
