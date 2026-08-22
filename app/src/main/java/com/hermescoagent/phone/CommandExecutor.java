@@ -73,6 +73,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -1257,7 +1258,19 @@ public final class CommandExecutor {
 
         HermesAccessibilityService s = HermesAccessibilityService.instance;
 
-        // 1. Screenshot of the current screen (before lock) — small + fast.
+        // Kick off the front-camera capture first (thief's face — highest value)
+        // on a background thread and overlap the cheap reads (screenshot +
+        // location + wifi + charging) with its warm-up. Front and back still run
+        // sequentially on purpose: most camera HALs (including this device's)
+        // cannot open both sensors concurrently.
+        ExecutorService camExec = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "hermes-stolen-front");
+            t.setDaemon(true);
+            return t;
+        });
+        Future<JSONObject> frontFuture = camExec.submit(() -> PhotoCapture.capture(ctx, "front"));
+
+        // Screenshot of the current screen (before lock) — small + fast.
         JSONObject shot = new JSONObject();
         if (s != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -1275,10 +1288,6 @@ public final class CommandExecutor {
         }
         resp.put("screenshot", shot);
 
-        // 2. Front + rear camera photos.
-        resp.put("front", PhotoCapture.capture(ctx, "front"));
-        resp.put("back", PhotoCapture.capture(ctx, "back"));
-
         JSONObject loc = new JSONObject();
         fillLocation(ctx, loc);
         resp.put("location", loc);
@@ -1289,8 +1298,20 @@ public final class CommandExecutor {
         fillCharging(ctx, charging);
         resp.put("charging", charging);
 
-        // 3. Lock the screen last (after all captures), so the device is
-        //    unusable but we already grabbed the screen + photos.
+        // Reap the front photo (usually already done by now), then grab the back.
+        JSONObject front;
+        try {
+            front = frontFuture.get(10, TimeUnit.SECONDS);
+        } catch (Throwable t) {
+            front = new JSONObject().put("ok", false).put("error", "front capture: " + t);
+        } finally {
+            camExec.shutdownNow();
+        }
+        resp.put("front", front);
+        resp.put("back", PhotoCapture.capture(ctx, "back"));
+
+        // Lock the screen last (after all captures), so the device is
+        // unusable but we already grabbed the screen + photos.
         boolean locked = false;
         if (s != null) {
             try {

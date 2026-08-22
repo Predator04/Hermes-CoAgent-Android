@@ -42,11 +42,11 @@ public final class PhotoCapture {
 
     private PhotoCapture() {}
 
-    private static final long OPEN_TIMEOUT_MS = 5000L;
-    private static final long SESSION_TIMEOUT_MS = 5000L;
-    private static final long CAPTURE_TIMEOUT_MS = 6000L;
-    private static final long AE_CONVERGE_TIMEOUT_MS = 800L;
-    private static final long AE_PRECAPTURE_SETTLE_MS = 120L;
+    private static final long OPEN_TIMEOUT_MS = 3000L;
+    private static final long SESSION_TIMEOUT_MS = 3000L;
+    private static final long CAPTURE_TIMEOUT_MS = 4000L;
+    private static final long AE_CONVERGE_TIMEOUT_MS = 350L;
+    private static final long AE_PRECAPTURE_SETTLE_MS = 60L;
     private static final int MAX_IMAGES = 2;
     // Cap picked JPEG size around 4 MP for reasonable base64 payloads.
     private static final long SIZE_CAP_PIXELS = 4L * 1024 * 1024;
