@@ -74,6 +74,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `ping` | — | Health check → `{"ok":true,"pong":true}` |
 | `shutdown` | — | Stop the remote-control service (LAN/relay). Responds `{"ok":true,"shutting_down":true}` then tears down ~400 ms later |
 | `tap` | `x`, `y` | Tap a screen coordinate |
+| `long_press` | `x`, `y`, `duration?` | Press and hold a screen coordinate (context menus, app shortcuts, text selection) |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `duration?` | Swipe between two points |
 | `type` | `text` | Type into the focused field |
 | `key` | `code` | Global action: `back` `home` `recents` `notifications` `quick_settings` `power` `lock` |

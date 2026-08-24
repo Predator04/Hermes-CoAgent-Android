@@ -80,6 +80,15 @@ public class HermesAccessibilityService extends AccessibilityService {
         return dispatchGesture(g, null, null);
     }
 
+    public boolean longPress(int x, int y, long durationMs) {
+        long duration = Math.max(MIN_SWIPE_MS, Math.min(MAX_SWIPE_MS, durationMs));
+        Path p = new Path();
+        p.moveTo(x, y);
+        GestureDescription g = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, duration)).build();
+        return dispatchGesture(g, null, null);
+    }
+
     public boolean swipe(int x1, int y1, int x2, int y2, long durationMs) {
         long duration = Math.max(MIN_SWIPE_MS, Math.min(MAX_SWIPE_MS, durationMs));
         Path p = new Path();

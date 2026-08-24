@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private static final CmdGroup[] COMMAND_GROUPS = {
             new CmdGroup("Screen control", new Cmd[]{
                     new Cmd("Tap the screen", "Tap at an (x, y) coordinate", "tap"),
+                    new Cmd("Long press", "Press and hold a coordinate", "long_press"),
                     new Cmd("Swipe", "Drag between two points", "swipe"),
                     new Cmd("Type text", "Type into the focused field", "type"),
                     new Cmd("Press a key", "Back, home, recents, power", "key"),

@@ -226,6 +226,12 @@ public final class CommandExecutor {
                 else resp.put("ok", s.tap(req.getInt("x"), req.getInt("y")));
                 break;
             }
+            case "long_press": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else resp.put("ok", s.longPress(req.getInt("x"), req.getInt("y"), req.optLong("duration", 650)));
+                break;
+            }
             case "swipe": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }

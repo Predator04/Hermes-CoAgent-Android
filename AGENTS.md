@@ -22,7 +22,7 @@ Every request carries a shared-secret token in the `X-Hermes-Token` header. The 
 ## The core control loop (how to actually drive the phone)
 
 1. **See** the screen with `dump` (UI tree — instant, gives every element's text + bounds) or `screenshot` (base64 JPEG).
-2. **Act** with `tap {x,y}`, `swipe`, `type {text}`, `key {code}`, `launch {package}`, `find_tap {query}`.
+2. **Act** with `tap {x,y}`, `long_press {x,y}`, `swipe`, `type {text}`, `key {code}`, `launch {package}`, `find_tap {query}`.
 3. **Verify** with a follow-up `dump`/`screenshot`.
 
 Prefer `dump`/`find`/`find_tap` for navigation (instant, precise); use `screenshot` only to confirm you landed where you expected or to read toggle states.
