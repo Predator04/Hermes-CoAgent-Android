@@ -473,6 +473,9 @@ public final class CommandExecutor {
             case "snapshot":
                 snapshot(ctx, req, resp);
                 break;
+            case "screen":
+                screen(ctx, req, resp);
+                break;
             case "wake":
                 wake(ctx, resp);
                 break;
@@ -1751,6 +1754,99 @@ public final class CommandExecutor {
     }
 
     // ──────────────────────────────── wake ───────────────────────────────
+
+    private static void screen(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            if (req.has("on")) {
+                boolean turnOn = req.optBoolean("on", true);
+                if (turnOn) {
+                    try { wake(ctx, new JSONObject()); } catch (Throwable ignored) {}
+                } else {
+                    HermesAccessibilityService s = HermesAccessibilityService.instance;
+                    if (s == null) {
+                        resp.put("ok", false);
+                        resp.put("error", "accessibility not enabled");
+                        return;
+                    }
+                    if (!s.lockScreen()) {
+                        resp.put("ok", false);
+                        resp.put("error", "screen off failed");
+                        return;
+                    }
+                }
+            }
+
+            boolean hasBrightness = req.has("brightness");
+            boolean hasBrightnessMode = req.has("brightness_mode");
+            if (hasBrightness || hasBrightnessMode) {
+                if (!Settings.System.canWrite(ctx)) {
+                    resp.put("ok", false);
+                    resp.put("error", "system settings write permission not granted");
+                    return;
+                }
+                android.content.ContentResolver resolver = ctx.getContentResolver();
+                if (hasBrightnessMode) {
+                    String modeStr = req.optString("brightness_mode", "");
+                    int modeVal = "auto".equalsIgnoreCase(modeStr)
+                            ? Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+                            : Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL;
+                    try {
+                        Settings.System.putInt(resolver,
+                                Settings.System.SCREEN_BRIGHTNESS_MODE, modeVal);
+                    } catch (Throwable ignored) {}
+                }
+                if (hasBrightness) {
+                    int value = req.optInt("brightness", 0);
+                    if (value < 0) value = 0;
+                    if (value > 255) value = 255;
+                    try {
+                        Settings.System.putInt(resolver,
+                                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+                    } catch (Throwable ignored) {}
+                    try {
+                        Settings.System.putInt(resolver,
+                                Settings.System.SCREEN_BRIGHTNESS, value);
+                    } catch (Throwable ignored) {}
+                }
+            }
+
+            boolean on = false;
+            try {
+                PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+                if (pm != null) on = pm.isInteractive();
+            } catch (Throwable ignored) {}
+            resp.put("on", on);
+
+            boolean locked = false;
+            boolean secure = false;
+            try {
+                KeyguardManager km = (KeyguardManager) ctx.getSystemService(Context.KEYGUARD_SERVICE);
+                if (km != null) {
+                    locked = km.isKeyguardLocked();
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        secure = km.isKeyguardSecure();
+                    }
+                }
+            } catch (Throwable ignored) {}
+            resp.put("locked", locked);
+            resp.put("secure", secure);
+
+            try {
+                android.content.ContentResolver resolver = ctx.getContentResolver();
+                int b = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1);
+                resp.put("brightness", b);
+                int m = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+                resp.put("brightness_mode",
+                        m == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC ? "auto" : "manual");
+            } catch (Throwable ignored) {}
+
+            resp.put("ok", true);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
 
     private static void wake(Context ctx, JSONObject resp) {
         boolean screenOn = false;

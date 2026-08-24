@@ -81,6 +81,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "â€
 | `scroll` | `direction` | Scroll the focused scrollable (`up`/`down`) |
 | `wait` | `for`, `until`, `timeout_ms?` | Wait until text appears/disappears in the UI |
 | `wake` | â€” | Wake the screen |
+| `screen` | `on?`, `brightness?`, `brightness_mode?` | Display state (on, locked, secure) plus wake/sleep and brightness get/set |
 
 ### Seeing the screen
 
