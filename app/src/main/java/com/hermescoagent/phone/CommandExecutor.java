@@ -30,6 +30,9 @@ import android.media.MediaPlayer;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
@@ -45,6 +48,8 @@ import android.os.Vibrator;
 import android.provider.Settings;
 import android.provider.Telephony;
 import android.speech.tts.TextToSpeech;
+import android.telephony.SignalStrength;
+import android.telephony.TelephonyManager;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
@@ -55,6 +60,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -389,6 +396,9 @@ public final class CommandExecutor {
                 break;
             case "wifi":
                 fillWifi(ctx, resp);
+                break;
+            case "network":
+                fillNetwork(ctx, resp);
                 break;
             case "charging":
                 fillCharging(ctx, resp);
@@ -1082,6 +1092,203 @@ public final class CommandExecutor {
             }
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    // ─────────────────────────────── network ─────────────────────────────
+
+    @SuppressWarnings("deprecation")
+    private static void fillNetwork(Context ctx, JSONObject resp) {
+        try {
+            boolean airplane = false;
+            try {
+                airplane = Settings.Global.getInt(ctx.getContentResolver(),
+                        Settings.Global.AIRPLANE_MODE_ON, 0) == 1;
+            } catch (Exception ignored) {}
+            resp.put("airplane", airplane);
+
+            ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+            boolean dataSaver = false;
+            try {
+                if (cm != null) {
+                    dataSaver = cm.getRestrictBackgroundStatus()
+                            == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED;
+                }
+            } catch (Exception ignored) {}
+            resp.put("data_saver", dataSaver);
+
+            Network active = cm != null ? cm.getActiveNetwork() : null;
+            NetworkCapabilities caps = active != null ? cm.getNetworkCapabilities(active) : null;
+
+            if (active == null || caps == null) {
+                resp.put("type", "none");
+                resp.put("transports", new JSONArray());
+                resp.put("internet", false);
+                resp.put("validated", false);
+                resp.put("metered", false);
+                resp.put("ips", new JSONArray());
+                return;
+            }
+
+            JSONArray transports = new JSONArray();
+            boolean hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+            boolean hasWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+            boolean hasEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET);
+            boolean hasCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
+            boolean hasBluetooth = caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH);
+            boolean hasWifiAware = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI_AWARE);
+            if (hasVpn) transports.put("vpn");
+            if (hasWifi) transports.put("wifi");
+            if (hasEthernet) transports.put("ethernet");
+            if (hasCellular) transports.put("cellular");
+            if (hasBluetooth) transports.put("bluetooth");
+            if (hasWifiAware) transports.put("wifi_aware");
+            resp.put("transports", transports);
+
+            String type;
+            if (hasVpn) type = "vpn";
+            else if (hasWifi) type = "wifi";
+            else if (hasEthernet) type = "ethernet";
+            else if (hasCellular) type = "mobile";
+            else if (hasBluetooth) type = "bluetooth";
+            else type = "none";
+            resp.put("type", type);
+
+            resp.put("internet", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET));
+            resp.put("validated", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+            resp.put("metered", !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED));
+
+            JSONArray ips = new JSONArray();
+            java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+            try {
+                LinkProperties lp = cm.getLinkProperties(active);
+                if (lp != null) {
+                    for (LinkAddress la : lp.getLinkAddresses()) {
+                        InetAddress a = la.getAddress();
+                        if (a instanceof Inet4Address && !a.isLoopbackAddress()) {
+                            String h = a.getHostAddress();
+                            if (h != null && seen.add(h)) ips.put(h);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (seen.isEmpty()) {
+                try {
+                    WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wm != null) {
+                        int raw = wm.getConnectionInfo().getIpAddress();
+                        if (raw != 0) {
+                            String h = String.format(Locale.US, "%d.%d.%d.%d",
+                                    (raw & 0xff), (raw >> 8 & 0xff), (raw >> 16 & 0xff), (raw >> 24 & 0xff));
+                            if (seen.add(h)) ips.put(h);
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            resp.put("ips", ips);
+
+            if (hasWifi) {
+                try {
+                    JSONObject w = new JSONObject();
+                    WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wm != null) {
+                        WifiInfo info = wm.getConnectionInfo();
+                        if (info != null) {
+                            String ssid = info.getSSID();
+                            if (ssid != null) {
+                                if (ssid.startsWith("\"") && ssid.endsWith("\"") && ssid.length() >= 2) {
+                                    ssid = ssid.substring(1, ssid.length() - 1);
+                                }
+                                w.put("ssid", ssid);
+                            }
+                            if (info.getBSSID() != null) w.put("bssid", info.getBSSID());
+                            w.put("rssi", info.getRssi());
+                        }
+                    }
+                    resp.put("wifi", w);
+                } catch (Exception ignored) {}
+            }
+
+            TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+            boolean includeMobile = hasCellular;
+            if (!includeMobile && tm != null) {
+                try {
+                    int dnt = tm.getDataNetworkType();
+                    includeMobile = dnt != TelephonyManager.NETWORK_TYPE_UNKNOWN;
+                } catch (Exception ignored) {}
+            }
+            if (includeMobile && tm != null) {
+                JSONObject m = new JSONObject();
+                try {
+                    String carrier = tm.getNetworkOperatorName();
+                    m.put("carrier", carrier == null ? "" : carrier);
+                } catch (Exception ignored) {}
+                try {
+                    m.put("network_type", networkTypeName(tm.getDataNetworkType()));
+                } catch (Exception ignored) {}
+                try {
+                    m.put("roaming", tm.isNetworkRoaming());
+                } catch (Exception ignored) {}
+                try {
+                    int ds = tm.getDataState();
+                    String dsName;
+                    switch (ds) {
+                        case TelephonyManager.DATA_DISCONNECTED: dsName = "disconnected"; break;
+                        case TelephonyManager.DATA_CONNECTING:   dsName = "connecting"; break;
+                        case TelephonyManager.DATA_CONNECTED:    dsName = "connected"; break;
+                        case TelephonyManager.DATA_SUSPENDED:    dsName = "suspended"; break;
+                        default: dsName = "unknown";
+                    }
+                    m.put("data_state", dsName);
+                } catch (Exception ignored) {}
+                try {
+                    if (ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        SignalStrength ss = tm.getSignalStrength();
+                        if (ss != null) {
+                            try { m.put("signal_level", ss.getLevel()); } catch (Exception ignored) {}
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                try {
+                                    java.util.List<android.telephony.CellSignalStrength> list =
+                                            ss.getCellSignalStrengths();
+                                    if (list != null && !list.isEmpty()) {
+                                        int dbm = list.get(0).getDbm();
+                                        if (dbm != Integer.MAX_VALUE) m.put("signal_dbm", dbm);
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+                resp.put("mobile", m);
+            }
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static String networkTypeName(int t) {
+        switch (t) {
+            case TelephonyManager.NETWORK_TYPE_NR:      return "NR";
+            case TelephonyManager.NETWORK_TYPE_LTE:     return "LTE";
+            case TelephonyManager.NETWORK_TYPE_HSPAP:
+            case TelephonyManager.NETWORK_TYPE_HSPA:
+            case TelephonyManager.NETWORK_TYPE_HSDPA:
+            case TelephonyManager.NETWORK_TYPE_HSUPA:   return "HSPA";
+            case TelephonyManager.NETWORK_TYPE_UMTS:    return "UMTS";
+            case TelephonyManager.NETWORK_TYPE_GPRS:    return "GPRS";
+            case TelephonyManager.NETWORK_TYPE_EDGE:    return "EDGE";
+            case TelephonyManager.NETWORK_TYPE_CDMA:
+            case TelephonyManager.NETWORK_TYPE_EVDO_0:
+            case TelephonyManager.NETWORK_TYPE_EVDO_A:
+            case TelephonyManager.NETWORK_TYPE_EVDO_B:  return "CDMA";
+            case TelephonyManager.NETWORK_TYPE_1xRTT:   return "1xRTT";
+            case TelephonyManager.NETWORK_TYPE_IWLAN:   return "IWLAN";
+            case TelephonyManager.NETWORK_TYPE_GSM:     return "GSM";
+            case TelephonyManager.NETWORK_TYPE_TD_SCDMA:return "TD_SCDMA";
+            default: return "unknown";
         }
     }
 

@@ -103,6 +103,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `list_apps` | — | Installed launchable apps |
 | `location` | — | GPS position (lat/lng/accuracy) |
 | `wifi` | — | Wi-Fi state + SSID |
+| `network` | — | Network connectivity: type, internet status, local IPs, Wi-Fi, cellular signal |
 | `charging` | — | Charging state |
 | `clipboard_get` | — | Read the clipboard *(Android 10+ restricts background reads)* |
 | `clipboard_set` | `text` | Write the clipboard |
