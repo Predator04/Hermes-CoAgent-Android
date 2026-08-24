@@ -394,6 +394,9 @@ public final class CommandExecutor {
             case "vibrate":
                 vibrate(ctx, resp);
                 break;
+            case "volume":
+                volume(ctx, req, resp);
+                break;
             case "wifi":
                 fillWifi(ctx, resp);
                 break;
@@ -1060,6 +1063,85 @@ public final class CommandExecutor {
                 v.vibrate(pattern, -1);
             }
             try { resp.put("ok", true); } catch (Exception ignored) {}
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    // ────────────────────────────── volume ───────────────────────────────
+
+    private static void volume(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) {
+                resp.put("ok", false); resp.put("error", "no audio manager"); return;
+            }
+            String streamName = req.optString("stream", "");
+            String modeName = req.optString("mode", "");
+            boolean hasStream = req.has("stream") && !streamName.isEmpty();
+            boolean hasMode = req.has("mode") && !modeName.isEmpty();
+
+            if (hasStream) {
+                int stream;
+                switch (streamName.toLowerCase(Locale.US)) {
+                    case "call": case "voice": stream = AudioManager.STREAM_VOICE_CALL; break;
+                    case "system": stream = AudioManager.STREAM_SYSTEM; break;
+                    case "ring": stream = AudioManager.STREAM_RING; break;
+                    case "music": case "media": stream = AudioManager.STREAM_MUSIC; break;
+                    case "alarm": stream = AudioManager.STREAM_ALARM; break;
+                    case "notification": stream = AudioManager.STREAM_NOTIFICATION; break;
+                    case "dtmf": stream = AudioManager.STREAM_DTMF; break;
+                    default:
+                        resp.put("ok", false); resp.put("error", "unknown stream: " + streamName); return;
+                }
+                int max = am.getStreamMaxVolume(stream);
+                int level = req.optInt("level", am.getStreamVolume(stream));
+                int clamped = Math.max(0, Math.min(max, level));
+                am.setStreamVolume(stream, clamped, 0);
+                resp.put("stream", streamName.toLowerCase(Locale.US));
+                resp.put("level", clamped);
+                resp.put("max", max);
+                return;
+            }
+
+            if (hasMode) {
+                int mode;
+                switch (modeName.toLowerCase(Locale.US)) {
+                    case "normal": mode = AudioManager.RINGER_MODE_NORMAL; break;
+                    case "vibrate": mode = AudioManager.RINGER_MODE_VIBRATE; break;
+                    case "silent": mode = AudioManager.RINGER_MODE_SILENT; break;
+                    default:
+                        resp.put("ok", false); resp.put("error", "unknown mode: " + modeName); return;
+                }
+                am.setRingerMode(mode);
+                resp.put("mode", modeName.toLowerCase(Locale.US));
+                return;
+            }
+
+            String currentMode;
+            switch (am.getRingerMode()) {
+                case AudioManager.RINGER_MODE_NORMAL: currentMode = "normal"; break;
+                case AudioManager.RINGER_MODE_VIBRATE: currentMode = "vibrate"; break;
+                case AudioManager.RINGER_MODE_SILENT: currentMode = "silent"; break;
+                default: currentMode = "unknown";
+            }
+            resp.put("mode", currentMode);
+
+            JSONObject streams = new JSONObject();
+            int[] ids = {
+                    AudioManager.STREAM_VOICE_CALL, AudioManager.STREAM_SYSTEM,
+                    AudioManager.STREAM_RING, AudioManager.STREAM_MUSIC,
+                    AudioManager.STREAM_ALARM, AudioManager.STREAM_NOTIFICATION,
+                    AudioManager.STREAM_DTMF
+            };
+            String[] names = { "call", "system", "ring", "music", "alarm", "notification", "dtmf" };
+            for (int i = 0; i < ids.length; i++) {
+                JSONObject o = new JSONObject();
+                o.put("level", am.getStreamVolume(ids[i]));
+                o.put("max", am.getStreamMaxVolume(ids[i]));
+                streams.put(names[i], o);
+            }
+            resp.put("streams", streams);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }
