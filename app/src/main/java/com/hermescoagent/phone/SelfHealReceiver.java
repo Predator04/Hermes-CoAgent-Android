@@ -33,7 +33,7 @@ public class SelfHealReceiver extends BroadcastReceiver {
 
     public static boolean isAutoUpdateEnabled(Context ctx) {
         SharedPreferences sp = ctx.getSharedPreferences(RemoteControlService.PREFS, Context.MODE_PRIVATE);
-        return sp.getBoolean(KEY_AUTO_UPDATE, true);
+        return sp.getBoolean(KEY_AUTO_UPDATE, false);
     }
 
     public static void setAutoUpdateEnabled(Context ctx, boolean enabled) {
