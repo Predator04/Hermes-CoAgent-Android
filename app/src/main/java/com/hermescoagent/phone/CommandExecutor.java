@@ -1422,8 +1422,99 @@ public final class CommandExecutor {
 
     private static void fillBattery(Context ctx, JSONObject resp) throws Exception {
         BatteryManager bm = (BatteryManager) ctx.getSystemService(Context.BATTERY_SERVICE);
-        if (bm == null) { resp.put("ok", false); resp.put("error", "no battery service"); return; }
-        resp.put("level", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+        Intent batt = null;
+        try {
+            IntentFilter f = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            batt = ctx.registerReceiver(null, f);
+        } catch (Throwable ignored) {}
+
+        int level = -1;
+        try {
+            if (bm != null) {
+                int cap = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+                if (cap >= 0 && cap <= 100) level = cap;
+            }
+        } catch (Throwable ignored) {}
+        if (level < 0 && batt != null) {
+            try {
+                int l = batt.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = batt.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+                if (l >= 0 && scale > 0) level = Math.round(100f * l / scale);
+            } catch (Throwable ignored) {}
+        }
+        resp.put("level", level);
+
+        if (batt != null) {
+            try {
+                int status = batt.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                boolean charging = status == BatteryManager.BATTERY_STATUS_CHARGING
+                        || status == BatteryManager.BATTERY_STATUS_FULL;
+                resp.put("charging", charging);
+                String statusStr;
+                switch (status) {
+                    case BatteryManager.BATTERY_STATUS_CHARGING: statusStr = "charging"; break;
+                    case BatteryManager.BATTERY_STATUS_DISCHARGING: statusStr = "discharging"; break;
+                    case BatteryManager.BATTERY_STATUS_FULL: statusStr = "full"; break;
+                    case BatteryManager.BATTERY_STATUS_NOT_CHARGING: statusStr = "not_charging"; break;
+                    default: statusStr = "unknown";
+                }
+                resp.put("status", statusStr);
+            } catch (Throwable ignored) {}
+
+            try {
+                int plugged = batt.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+                String type;
+                switch (plugged) {
+                    case BatteryManager.BATTERY_PLUGGED_USB: type = "usb"; break;
+                    case BatteryManager.BATTERY_PLUGGED_AC: type = "ac"; break;
+                    case BatteryManager.BATTERY_PLUGGED_WIRELESS: type = "wireless"; break;
+                    case 0: type = "none"; break;
+                    default: type = "unknown";
+                }
+                resp.put("charge_type", type);
+            } catch (Throwable ignored) {}
+
+            try {
+                int health = batt.getIntExtra(BatteryManager.EXTRA_HEALTH, -1);
+                String healthStr;
+                switch (health) {
+                    case BatteryManager.BATTERY_HEALTH_GOOD: healthStr = "good"; break;
+                    case BatteryManager.BATTERY_HEALTH_OVERHEAT: healthStr = "overheat"; break;
+                    case BatteryManager.BATTERY_HEALTH_DEAD: healthStr = "dead"; break;
+                    case BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE: healthStr = "over_voltage"; break;
+                    case BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE: healthStr = "unspecified_failure"; break;
+                    case BatteryManager.BATTERY_HEALTH_COLD: healthStr = "cold"; break;
+                    default: healthStr = "unknown";
+                }
+                resp.put("health", healthStr);
+            } catch (Throwable ignored) {}
+
+            try {
+                int tempTenths = batt.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                if (tempTenths != Integer.MIN_VALUE) {
+                    resp.put("temperature_c", tempTenths / 10.0);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                String tech = batt.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY);
+                if (tech != null && tech.length() > 0) resp.put("technology", tech);
+            } catch (Throwable ignored) {}
+        }
+
+        if (batt != null) {
+            try {
+                int v = batt.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Integer.MIN_VALUE);
+                if (v != Integer.MIN_VALUE) resp.put("voltage_mv", v);
+            } catch (Throwable ignored) {}
+        }
+
+        try {
+            if (bm != null) {
+                int cur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+                if (cur != Integer.MIN_VALUE) resp.put("current_ua", cur);
+            }
+        } catch (Throwable ignored) {}
     }
 
     // ─────────────────────────────── storage ─────────────────────────────
