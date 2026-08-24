@@ -32,10 +32,19 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent == null ? null : intent.getAction();
-        boolean boot = Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || "android.intent.action.QUICKBOOT_POWERON".equals(action);
-        if (!boot) return;
+        // MY_PACKAGE_REPLACED is the critical self-heal signal: the OS killed
+        // our process to install the new APK, and this is our one chance to
+        // relaunch the service so the phone stays reachable without the user
+        // ever opening the app.
+        boolean trigger = Intent.ACTION_BOOT_COMPLETED.equals(action)
+                || "android.intent.action.QUICKBOOT_POWERON".equals(action)
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
+        if (!trigger) return;
         if (!isAutoStartEnabled(context)) return;
+
+        // Always re-arm the watchdog alarms; the OS drops them on package replace.
+        try { SelfHealReceiver.scheduleAll(context); } catch (Throwable ignored) {}
+
         if (RemoteControlService.isRunning) return;
 
         Intent i = new Intent(context, RemoteControlService.class);

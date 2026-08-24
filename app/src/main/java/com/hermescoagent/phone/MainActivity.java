@@ -590,6 +590,27 @@ public class MainActivity extends Activity {
         });
         root.addView(privacyToggle);
 
+        // ─── Auto-update toggle ───────────────────────────────────────────
+        Switch autoUpdateToggle = new Switch(this);
+        autoUpdateToggle.setText("  Auto-update in background");
+        autoUpdateToggle.setTextColor(Color.WHITE);
+        autoUpdateToggle.setChecked(SelfHealReceiver.isAutoUpdateEnabled(this));
+        LinearLayout.LayoutParams autoUpdLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        autoUpdLp.setMargins(0, dp(12), 0, dp(4));
+        autoUpdateToggle.setLayoutParams(autoUpdLp);
+        autoUpdateToggle.setOnCheckedChangeListener((btn, checked) ->
+                SelfHealReceiver.setAutoUpdateEnabled(this, checked));
+        root.addView(autoUpdateToggle);
+
+        TextView autoUpdateHint = new TextView(this);
+        autoUpdateHint.setText("Automatically download and install app updates in the background.");
+        autoUpdateHint.setTextSize(11);
+        autoUpdateHint.setTextColor(COLOR_MUTED);
+        autoUpdateHint.setPadding(0, 0, 0, dp(8));
+        root.addView(autoUpdateHint);
+
         // ─── Check for updates ────────────────────────────────────────────
         Button checkUpdates = new Button(this);
         checkUpdates.setText("Check for updates");
@@ -643,6 +664,10 @@ public class MainActivity extends Activity {
         UpdateChecker.checkForUpdate(this, (available, code, name1, apkUrl, notes) -> {
             if (available) showUpdateDialog(code, name1, apkUrl, notes);
         });
+
+        // Fallback: schedule the self-heal / auto-update alarms even if the
+        // service isn't running yet (first launch after install).
+        try { SelfHealReceiver.scheduleAll(getApplicationContext()); } catch (Throwable ignored) {}
     }
 
     // ─────────────────────────── UI helpers ─────────────────────────────

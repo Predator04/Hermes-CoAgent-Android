@@ -66,6 +66,8 @@ public class RemoteControlService extends Service {
         startServer();
         // Resume periodic GPS breadcrumbs if the user previously enabled tracking.
         LocationTracker.resumeIfEnabled(this);
+        // Watchdog: keep the service healed and auto-update in the background.
+        try { SelfHealReceiver.scheduleAll(getApplicationContext()); } catch (Throwable ignored) {}
         isRunning = true;
         // The overlay bar is shown per-command by CommandExecutor (not for the
         // whole service lifetime), so it only appears while actively executing.
