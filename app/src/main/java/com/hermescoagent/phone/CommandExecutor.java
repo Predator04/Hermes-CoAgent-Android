@@ -43,6 +43,7 @@ import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.StatFs;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -261,6 +262,9 @@ public final class CommandExecutor {
             }
             case "battery":
                 fillBattery(ctx, resp);
+                break;
+            case "storage":
+                fillStorage(ctx, resp);
                 break;
             case "info": {
                 resp.put("model", Build.MODEL);
@@ -1414,6 +1418,47 @@ public final class CommandExecutor {
         BatteryManager bm = (BatteryManager) ctx.getSystemService(Context.BATTERY_SERVICE);
         if (bm == null) { resp.put("ok", false); resp.put("error", "no battery service"); return; }
         resp.put("level", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+    }
+
+    // ─────────────────────────────── storage ─────────────────────────────
+
+    private static void fillStorage(Context ctx, JSONObject resp) {
+        try {
+            JSONArray volumes = new JSONArray();
+            addVolume(volumes, "internal", ctx.getFilesDir());
+            File[] exts = ctx.getExternalFilesDirs(null);
+            if (exts != null) {
+                int idx = 0;
+                for (File dir : exts) {
+                    if (dir == null) continue;
+                    String name = idx == 0 ? "external" : ("external" + (idx + 1));
+                    addVolume(volumes, name, dir);
+                    idx++;
+                }
+            }
+            resp.put("volumes", volumes);
+        } catch (Exception e) {
+            try {
+                resp.put("ok", false);
+                resp.put("error", "storage read failed: " + e.getMessage());
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private static void addVolume(JSONArray volumes, String name, File dir) throws Exception {
+        StatFs sf = new StatFs(dir.getAbsolutePath());
+        long total = sf.getTotalBytes();
+        long free = sf.getAvailableBytes();
+        long used = total - free;
+        int freePercent = total > 0 ? (int) Math.round(100.0 * free / total) : 0;
+        JSONObject v = new JSONObject();
+        v.put("name", name);
+        v.put("path", dir.getAbsolutePath());
+        v.put("total", total);
+        v.put("free", free);
+        v.put("used", used);
+        v.put("free_percent", freePercent);
+        volumes.put(v);
     }
 
     // ─────────────────────────────── wait ────────────────────────────────
