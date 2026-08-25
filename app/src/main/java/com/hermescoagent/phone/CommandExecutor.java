@@ -289,6 +289,19 @@ public final class CommandExecutor {
             case "list_apps":
                 resp.put("apps", listLaunchableApps(ctx));
                 break;
+            case "foreground": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    String pkg = s.getForegroundPackage();
+                    String activity = s.getForegroundActivity();
+                    String title = s.getForegroundTitle();
+                    resp.put("package", pkg == null ? "" : pkg);
+                    resp.put("activity", activity == null ? "" : activity);
+                    resp.put("title", title == null ? "" : Redaction.redactText(ctx, title));
+                }
+                break;
+            }
             case "dump": {
                 if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
                 HermesAccessibilityService s = HermesAccessibilityService.instance;

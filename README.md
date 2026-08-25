@@ -92,6 +92,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `find` | `query` | Search the UI tree for text/label |
 | `find_tap` | `query` | Find a UI element by text and tap it |
 | `screenshot` | `scale?`, `quality?`, `max_edge?` | Screen capture → base64 JPEG in the response |
+| `foreground` | — | Report the current foreground app (package, activity class, window title) — the agent's cheap "where am I" check |
 | `snapshot` | — | Screen snapshot |
 | `watch` | `duration?`, `interval?` | Stream scaled screenshots to the relay (`/frame`) for near-live viewing — `duration` 1–60s (default 20), `interval` 0.5–5s (default 1.5) |
 | `screen_size` | — | Width/height/dpi — the coordinate space for taps |

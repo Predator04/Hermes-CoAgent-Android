@@ -18,6 +18,7 @@ import android.util.Base64;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -42,6 +43,12 @@ public class HermesAccessibilityService extends AccessibilityService {
 
     public static HermesAccessibilityService instance;
 
+    // Most-recent foreground state, updated from TYPE_WINDOW_STATE_CHANGED events
+    // so `foreground` can answer instantly without walking the accessibility tree.
+    private volatile String lastForegroundPackage = "";
+    private volatile String lastForegroundActivity = "";
+    private volatile String lastForegroundTitle = "";
+
     // StrokeDescription rejects durations <=0 and (implementation-defined) very
     // large values. Clamp to a sensible interactive range.
     private static final long MIN_SWIPE_MS = 50L;
@@ -61,7 +68,33 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {}
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        try {
+            if (event == null) return;
+            if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+            try {
+                CharSequence pkg = event.getPackageName();
+                lastForegroundPackage = pkg == null ? "" : pkg.toString();
+            } catch (Throwable ignored) {}
+            try {
+                CharSequence cls = event.getClassName();
+                lastForegroundActivity = cls == null ? "" : cls.toString();
+            } catch (Throwable ignored) {}
+            String title = "";
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    for (AccessibilityWindowInfo w : getWindows()) {
+                        if (w == null) continue;
+                        if (w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                            CharSequence t = w.getTitle();
+                            if (t != null) { title = t.toString(); break; }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+            lastForegroundTitle = title;
+        } catch (Throwable ignored) {}
+    }
 
     @Override
     public void onInterrupt() {}
@@ -336,6 +369,14 @@ public class HermesAccessibilityService extends AccessibilityService {
         } catch (Throwable t) {
             return "";
         }
+    }
+
+    public String getForegroundActivity() {
+        return lastForegroundActivity;
+    }
+
+    public String getForegroundTitle() {
+        return lastForegroundTitle;
     }
 
     // Screenshot rate limit is ~1/sec on many OEM ROMs, but the callback usually
