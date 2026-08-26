@@ -108,6 +108,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `wifi` | — | Wi-Fi state + SSID |
 | `network` | — | Network connectivity: type, internet status, local IPs, Wi-Fi, cellular signal |
 | `charging` | — | Charging state |
+| `memory` | — | RAM usage: total/available/used MB, used %, low-memory flag, /proc/meminfo breakdown (buffers, cached, swap), and the service process heap |
 | `clipboard_get` | — | Read the clipboard *(Android 10+ restricts background reads)* |
 | `clipboard_set` | `text` | Write the clipboard |
 

@@ -272,6 +272,9 @@ public final class CommandExecutor {
             case "storage":
                 fillStorage(ctx, resp);
                 break;
+            case "memory":
+                fillMemory(ctx, resp);
+                break;
             case "info": {
                 resp.put("model", Build.MODEL);
                 resp.put("manufacturer", Build.MANUFACTURER);
@@ -1569,6 +1572,82 @@ public final class CommandExecutor {
         v.put("used", used);
         v.put("free_percent", freePercent);
         volumes.put(v);
+    }
+
+    // ─────────────────────────────── memory ──────────────────────────────
+
+    private static double mb(long bytes) {
+        return Math.round(bytes / 1024.0 / 1024.0 * 10.0) / 10.0;
+    }
+
+    private static void fillMemory(Context ctx, JSONObject resp) {
+        try {
+            ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(mi);
+                long total = mi.totalMem;
+                long avail = mi.availMem;
+                long used = total - avail;
+                double usedPct = total > 0
+                        ? Math.round(10000.0 * used / total) / 100.0
+                        : 0.0;
+                resp.put("total_mb", mb(total));
+                resp.put("available_mb", mb(avail));
+                resp.put("used_mb", mb(used));
+                resp.put("used_pct", usedPct);
+                resp.put("low_memory", mi.lowMemory);
+                resp.put("threshold_mb", mb(mi.threshold));
+            }
+
+            try {
+                if (am != null) resp.put("low_ram_device", am.isLowRamDevice());
+            } catch (Throwable ignored) {}
+
+            Long buffersKb = null, cachedKb = null, swapTotalKb = null, swapFreeKb = null;
+            java.io.BufferedReader br = null;
+            try {
+                br = new java.io.BufferedReader(new java.io.FileReader("/proc/meminfo"));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    try {
+                        int colon = line.indexOf(':');
+                        if (colon <= 0) continue;
+                        String key = line.substring(0, colon);
+                        String rest = line.substring(colon + 1).trim();
+                        int sp = rest.indexOf(' ');
+                        String numStr = sp > 0 ? rest.substring(0, sp) : rest;
+                        long kb = Long.parseLong(numStr.trim());
+                        if ("Buffers".equals(key)) buffersKb = kb;
+                        else if ("Cached".equals(key)) cachedKb = kb;
+                        else if ("SwapTotal".equals(key)) swapTotalKb = kb;
+                        else if ("SwapFree".equals(key)) swapFreeKb = kb;
+                    } catch (Throwable ignored) {}
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                if (br != null) try { br.close(); } catch (Throwable ignored) {}
+            }
+            if (buffersKb != null) resp.put("buffers_mb", mb(buffersKb * 1024L));
+            if (cachedKb != null) resp.put("cached_mb", mb(cachedKb * 1024L));
+            if (swapTotalKb != null) resp.put("swap_total_mb", mb(swapTotalKb * 1024L));
+            if (swapFreeKb != null) resp.put("swap_free_mb", mb(swapFreeKb * 1024L));
+            if (swapTotalKb != null && swapFreeKb != null) {
+                resp.put("swap_used_mb", mb((swapTotalKb - swapFreeKb) * 1024L));
+            }
+
+            try {
+                Runtime rt = Runtime.getRuntime();
+                long heapTotal = rt.totalMemory();
+                long heapFree = rt.freeMemory();
+                long heapMax = rt.maxMemory();
+                resp.put("heap_used_mb", mb(heapTotal - heapFree));
+                resp.put("heap_allocated_mb", mb(heapTotal));
+                resp.put("heap_max_mb", mb(heapMax));
+            } catch (Throwable ignored) {}
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
     }
 
     // ─────────────────────────────── wait ────────────────────────────────
