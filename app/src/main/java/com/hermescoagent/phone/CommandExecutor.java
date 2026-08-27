@@ -46,6 +46,7 @@ import android.os.PowerManager;
 import android.os.StatFs;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.provider.CallLog;
 import android.provider.Settings;
 import android.provider.Telephony;
 import android.speech.tts.TextToSpeech;
@@ -359,6 +360,9 @@ public final class CommandExecutor {
                 break;
             case "latest_code":
                 latestCode(ctx, resp);
+                break;
+            case "call_log":
+                readCallLog(ctx, req, resp);
                 break;
             case "dismiss_notification": {
                 HermesNotificationListener nl = HermesNotificationListener.instance;
@@ -2217,6 +2221,65 @@ public final class CommandExecutor {
             resp.put("error", String.valueOf(t));
         } finally {
             if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void readCallLog(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            resp.put("ok", false);
+            resp.put("error", "READ_CALL_LOG permission not granted");
+            return;
+        }
+        int count = req.optInt("count", 50);
+        if (count < 1) count = 1;
+        if (count > 200) count = 200;
+        Cursor c = null;
+        try {
+            c = ctx.getContentResolver().query(CallLog.Calls.CONTENT_URI, null, null, null, CallLog.Calls.DATE + " DESC");
+            if (c == null) { resp.put("ok", false); resp.put("error", "no call log provider"); return; }
+            JSONArray out = new JSONArray();
+            int n = 0;
+            while (c.moveToNext() && n < count) {
+                try {
+                    JSONObject o = new JSONObject();
+                    int numIdx = c.getColumnIndex(CallLog.Calls.NUMBER);
+                    o.put("number", numIdx >= 0 ? c.getString(numIdx) : "");
+                    int typeIdx = c.getColumnIndex(CallLog.Calls.TYPE);
+                    o.put("type", callTypeName(typeIdx >= 0 ? c.getInt(typeIdx) : -1));
+                    int dateIdx = c.getColumnIndex(CallLog.Calls.DATE);
+                    o.put("date", dateIdx >= 0 ? c.getLong(dateIdx) : 0L);
+                    int durIdx = c.getColumnIndex(CallLog.Calls.DURATION);
+                    o.put("duration", durIdx >= 0 ? c.getLong(durIdx) : 0L);
+                    int nameIdx = c.getColumnIndex(CallLog.Calls.CACHED_NAME);
+                    if (nameIdx >= 0) {
+                        String name = c.getString(nameIdx);
+                        if (name != null && !name.isEmpty()) o.put("name", name);
+                    }
+                    out.put(o);
+                    n++;
+                } catch (Throwable ignored) {}
+            }
+            resp.put("ok", true);
+            resp.put("calls", out);
+            resp.put("count", out.length());
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", String.valueOf(t));
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static String callTypeName(int type) {
+        switch (type) {
+            case CallLog.Calls.INCOMING_TYPE: return "incoming";
+            case CallLog.Calls.OUTGOING_TYPE: return "outgoing";
+            case CallLog.Calls.MISSED_TYPE: return "missed";
+            case CallLog.Calls.VOICEMAIL_TYPE: return "voicemail";
+            case CallLog.Calls.REJECTED_TYPE: return "rejected";
+            case CallLog.Calls.BLOCKED_TYPE: return "blocked";
+            case CallLog.Calls.ANSWERED_EXTERNALLY_TYPE: return "answered_externally";
+            default: return "unknown";
         }
     }
 

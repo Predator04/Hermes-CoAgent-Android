@@ -159,6 +159,8 @@ public class MainActivity extends Activity {
     private TextView permsHeaderStatusView;
     private TextView smsStatusView;
     private Button smsPermBtn;
+    private TextView callLogStatusView;
+    private Button callLogPermBtn;
     private TextView notifAccessStatusView;
     private Button notifAccessBtn;
 
@@ -353,6 +355,39 @@ public class MainActivity extends Activity {
         smsNote.setTextColor(COLOR_MUTED);
         smsNote.setPadding(0, 0, 0, dp(8));
         settingsContent.addView(smsNote);
+
+        // ─── Call history ─────────────────────────────────────────────────
+        TextView callLogLabel = new TextView(this);
+        callLogLabel.setText("Call history");
+        callLogLabel.setTextSize(13);
+        callLogLabel.setTextColor(COLOR_TEXT);
+        callLogLabel.setTypeface(null, Typeface.BOLD);
+        callLogLabel.setPadding(0, dp(8), 0, dp(2));
+        settingsContent.addView(callLogLabel);
+
+        callLogStatusView = new TextView(this);
+        callLogStatusView.setTextSize(12);
+        callLogStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(callLogStatusView);
+
+        callLogPermBtn = new Button(this);
+        callLogPermBtn.setText("Allow call log access");
+        callLogPermBtn.setOnClickListener(v -> requestCallLogPermission());
+        styleButton(callLogPermBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams callLogBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        callLogBtnLp.setMargins(0, dp(8), 0, dp(4));
+        callLogPermBtn.setLayoutParams(callLogBtnLp);
+        settingsContent.addView(callLogPermBtn);
+
+        TextView callLogNote = new TextView(this);
+        callLogNote.setText("Lets the assistant read recent calls so you can see who called a lost "
+                + "or stolen phone.");
+        callLogNote.setTextSize(11);
+        callLogNote.setTextColor(COLOR_MUTED);
+        callLogNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(callLogNote);
 
         // ─── Sensitive-content masking ─────────────────────────────────────
         Switch maskToggle = new Switch(this);
@@ -1342,6 +1377,10 @@ public class MainActivity extends Activity {
             renderSmsStatus();
             Toast.makeText(this, isSmsPermissionGranted() ? "SMS access granted" : "SMS access denied",
                     Toast.LENGTH_SHORT).show();
+        } else if (requestCode == REQ_CALL_LOG) {
+            renderCallLogStatus();
+            Toast.makeText(this, isCallLogPermissionGranted() ? "Call log access granted" : "Call log access denied",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1519,6 +1558,7 @@ public class MainActivity extends Activity {
         refreshPermissions();
         renderBatteryStatus();
         renderSmsStatus();
+        renderCallLogStatus();
         renderNotifAccessStatus();
     }
 
@@ -1555,6 +1595,7 @@ public class MainActivity extends Activity {
 
     // ─── SMS / notification-access settings ──────────────────────────────
     private static final int REQ_SMS = 5001;
+    private static final int REQ_CALL_LOG = 5002;
 
     private boolean isSmsPermissionGranted() {
         return checkSelfPermission(Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -1571,6 +1612,22 @@ public class MainActivity extends Activity {
         smsStatusView.setText(granted ? "SMS access: Allowed" : "SMS access: Not allowed");
         smsStatusView.setTextColor(granted ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
         if (smsPermBtn != null) smsPermBtn.setVisibility(granted ? View.GONE : View.VISIBLE);
+    }
+
+    private boolean isCallLogPermissionGranted() {
+        return checkSelfPermission(Manifest.permission.READ_CALL_LOG) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestCallLogPermission() {
+        requestPermissions(new String[]{Manifest.permission.READ_CALL_LOG}, REQ_CALL_LOG);
+    }
+
+    private void renderCallLogStatus() {
+        if (callLogStatusView == null) return;
+        boolean granted = isCallLogPermissionGranted();
+        callLogStatusView.setText(granted ? "Call history: Allowed" : "Call history: Not allowed");
+        callLogStatusView.setTextColor(granted ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (callLogPermBtn != null) callLogPermBtn.setVisibility(granted ? View.GONE : View.VISIBLE);
     }
 
     private boolean isNotificationAccessEnabled() {

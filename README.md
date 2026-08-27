@@ -149,6 +149,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `location_history` | — | Return logged breadcrumbs |
 | `sim` | — | Current SIM identity |
 | `sim_events` | — | SIM-change events (detects a SIM swap) |
+| `call_log` | `count?` | Read recent call history (number, type, timestamp, duration) |
 | `open_url` | `url` | Open a URL — scheme-allowlisted to `http` `https` `mailto` `tel` `sms` `smsto` `geo` `market` `maps` |
 
 ### Notifications & privacy
