@@ -39,10 +39,7 @@ public final class ControlBanner {
     private static final String COLOR_STOP_BG   = "#F85149";
     private static final String COLOR_STOP_EDGE = "#33FFFFFF";
 
-    private static final long HIDE_DELAY_MS = 1500L;
-
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final Runnable hideTask = this::hideInternal;
     private WindowManager wm;
 
     private View pillView;
@@ -58,25 +55,29 @@ public final class ControlBanner {
 
     public static ControlBanner get() { return INSTANCE; }
 
-    /** Show the bar + red pulsing dot for an active command. Cancels any
-     *  pending hide. Called at the start of a non-stealth command. */
+    /** Show the bar + red pulsing dot for an active command. */
     public static void showActive(Context ctx) {
-        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.showInternal(ctx);
         INSTANCE.setActiveInternal(true);
     }
 
-    /** Dot back to gray, then hide shortly after (linger) so a burst of
-     *  rapid commands keeps the bar steady instead of flickering. */
-    public static void idle() {
-        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
+    /** Show the bar in its persistent idle state (gray dot, no auto-hide).
+     *  Called when the remote-control foreground service starts so the bar
+     *  is visible for its entire lifetime, not only while a command runs. */
+    public static void showIdle(Context ctx) {
+        INSTANCE.showInternal(ctx);
         INSTANCE.setActiveInternal(false);
-        INSTANCE.main.postDelayed(INSTANCE.hideTask, HIDE_DELAY_MS);
+    }
+
+    /** Return the dot to gray while keeping the bar visible. Called at the
+     *  end of a non-stealth command. The bar is torn down only by
+     *  {@link #hide()} (stealth actions) or by service shutdown. */
+    public static void idle() {
+        INSTANCE.setActiveInternal(false);
     }
 
     /** Immediately tear the bar down (stealth actions, service stop). */
     public static void hide() {
-        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.hideInternal();
     }
 

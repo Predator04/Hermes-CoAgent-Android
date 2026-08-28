@@ -473,28 +473,19 @@ public final class CommandExecutor {
                 else {
                     String dir = req.optString("direction", "down").toLowerCase();
                     boolean forward = dir.equals("down") || dir.equals("forward");
-                    boolean nodeScrolled = s.scroll(forward);
-                    String method;
-                    boolean ok;
-                    if (nodeScrolled) {
-                        ok = true;
-                        method = "node";
-                    } else {
-                        // Fallback: no scrollable node (e.g. launcher home). Simulate
-                        // a swipe covering ~60% of the screen height.
-                        DisplayMetrics dm = readDisplayMetrics(ctx);
-                        int cx = Math.max(1, dm.widthPixels / 2);
-                        int yHi = (int) (dm.heightPixels * 0.8);
-                        int yLo = (int) (dm.heightPixels * 0.2);
-                        // Scroll "down" = content moves up ⇒ swipe finger from low y to high y.
-                        int y1 = forward ? yHi : yLo;
-                        int y2 = forward ? yLo : yHi;
-                        ok = s.swipe(cx, y1, cx, y2, 300);
-                        method = "swipe";
-                    }
-                    resp.put("ok", ok);
+                    JSONObject r = s.scrollWithState(forward);
+                    boolean moved = r.optBoolean("moved", false);
+                    boolean atEdge = r.optBoolean("at_edge", false);
+                    // ok reflects "the request was honored" — either the
+                    // scroll moved OR we detected we're at the edge. That
+                    // way "scroll to end" loops can stop cleanly without
+                    // treating the terminal call as a failure.
+                    resp.put("ok", moved || atEdge);
                     resp.put("direction", forward ? "forward" : "backward");
-                    resp.put("method", method);
+                    resp.put("method", r.optString("method", "node"));
+                    resp.put("moved", moved);
+                    resp.put("at_edge", atEdge);
+                    if (r.has("edge")) resp.put("edge", r.optString("edge"));
                 }
                 break;
             }
@@ -1665,22 +1656,39 @@ public final class CommandExecutor {
         if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); return; }
         String needle = req.optString("for", "");
         String until = req.optString("until", "appear");
-        boolean wantAppear = !until.equalsIgnoreCase("disappear");
         long timeout = Math.max(100, req.optLong("timeout_ms", 5000));
         long start = System.currentTimeMillis();
         long deadline = start + timeout;
         boolean matched = false;
-        while (System.currentTimeMillis() < deadline) {
-            JSONArray hits = s.findNodes(needle);
-            boolean present = hits != null && hits.length() > 0;
-            if (wantAppear ? present : !present) { matched = true; break; }
-            try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+
+        if (until.equalsIgnoreCase("change")) {
+            String baseline = s.uiFingerprint();
+            resp.put("baseline_fingerprint", baseline == null ? "" : baseline);
+            while (System.currentTimeMillis() < deadline) {
+                String now = s.uiFingerprint();
+                if (baseline != null && now != null && !now.equals(baseline)) {
+                    matched = true;
+                    resp.put("fingerprint", now);
+                    break;
+                }
+                try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
+        } else {
+            boolean wantAppear = !until.equalsIgnoreCase("disappear");
+            while (System.currentTimeMillis() < deadline) {
+                JSONArray hits = s.findNodes(needle);
+                boolean present = hits != null && hits.length() > 0;
+                if (wantAppear ? present : !present) { matched = true; break; }
+                try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
         }
+
         long elapsed = System.currentTimeMillis() - start;
         resp.put("ok", matched);
         resp.put("matched", matched);
         resp.put("elapsed_ms", elapsed);
         resp.put("timed_out", !matched);
+        resp.put("until", until);
     }
 
     // ───────────────────────────── clipboard ─────────────────────────────

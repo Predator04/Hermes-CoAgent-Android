@@ -69,8 +69,9 @@ public class RemoteControlService extends Service {
         // Watchdog: keep the service healed and auto-update in the background.
         try { SelfHealReceiver.scheduleAll(getApplicationContext()); } catch (Throwable ignored) {}
         isRunning = true;
-        // The overlay bar is shown per-command by CommandExecutor (not for the
-        // whole service lifetime), so it only appears while actively executing.
+        // Persistent control bar for the entire service lifetime so anyone
+        // looking at the phone sees it is being controlled and can hit STOP.
+        try { ControlBanner.showIdle(this); } catch (Throwable ignored) {}
         return START_STICKY;
     }
 

@@ -27,6 +27,8 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -177,16 +179,92 @@ public class HermesAccessibilityService extends AccessibilityService {
         return false;
     }
 
-    /** Scroll the first scrollable node in the tree. dir=true → forward/down. */
+    /** Scroll the first scrollable node in the tree. dir=true → forward/down.
+     *  Thin wrapper around {@link #scrollWithState(boolean)}; retained for
+     *  callers that only need a boolean. */
     public boolean scroll(boolean forward) {
+        try {
+            JSONObject r = scrollWithState(forward);
+            return r.optBoolean("moved", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * Scroll and report edge state. Prefers a real accessibility scroll on
+     * the first scrollable node; falls back to a swipe gesture only when no
+     * scrollable node exists (e.g. launcher home). Returns
+     * {@code {method, moved, at_edge, edge?}} where {@code edge} is
+     * {@code "top"} or {@code "bottom"} when at the edge.
+     */
+    public JSONObject scrollWithState(boolean forward) throws JSONException {
+        JSONObject out = new JSONObject();
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
-        AccessibilityNodeInfo n = findFirstScrollable(root);
-        if (n == null) return false;
-        int action = forward
-                ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
-        return n.performAction(action);
+        AccessibilityNodeInfo n = root == null ? null : findFirstScrollable(root);
+        if (n != null) {
+            int action = forward
+                    ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+            boolean moved = n.performAction(action);
+            out.put("method", "node");
+            out.put("moved", moved);
+            out.put("at_edge", !moved);
+            if (!moved) out.put("edge", forward ? "bottom" : "top");
+            return out;
+        }
+        // No scrollable node: swipe fallback + fingerprint diff to detect
+        // whether anything actually moved (so the agent can stop after the
+        // last page instead of blind-swiping forever).
+        String before = uiFingerprint();
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int cx = Math.max(1, dm.widthPixels / 2);
+        int yHi = (int) (dm.heightPixels * 0.8);
+        int yLo = (int) (dm.heightPixels * 0.2);
+        int y1 = forward ? yHi : yLo;
+        int y2 = forward ? yLo : yHi;
+        boolean dispatched = swipe(cx, y1, cx, y2, 300);
+        try { Thread.sleep(400); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        String after = uiFingerprint();
+        boolean moved = dispatched && before != null && after != null && !before.equals(after);
+        out.put("method", "swipe");
+        out.put("moved", moved);
+        out.put("at_edge", !moved);
+        if (!moved) out.put("edge", forward ? "bottom" : "top");
+        return out;
+    }
+
+    /**
+     * Short hash of the current UI tree (text + desc + bounds of each node).
+     * Used to detect motion in the swipe fallback and by the {@code wait
+     * until:"change"} sub-condition. Returns null when the tree dump fails.
+     */
+    public String uiFingerprint() {
+        JSONArray arr = dumpNodes();
+        if (arr == null) return null;
+        StringBuilder sb = new StringBuilder(arr.length() * 24);
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            sb.append(o.optString("text", "")).append('|')
+              .append(o.optString("desc", "")).append('|')
+              .append(o.optJSONArray("bounds")).append('\n');
+        }
+        return shortHash(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** SHA-256 of the input, hex-encoded and truncated to 16 chars. */
+    static String shortHash(byte[] bytes) {
+        if (bytes == null) return null;
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) sb.append(String.format(Locale.ROOT, "%02x", d[i] & 0xff));
+            return sb.toString();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private AccessibilityNodeInfo findFirstScrollable(AccessibilityNodeInfo node) {
@@ -553,6 +631,10 @@ public class HermesAccessibilityService extends AccessibilityService {
             resp.put("scale", scale);
             resp.put("max_edge", maxEdge);
             resp.put("bytes", jpeg.length);
+            // Short hash of the encoded JPEG so callers can diff two frames
+            // without decoding them (or without receiving base64 at all).
+            String hash = shortHash(jpeg);
+            if (hash != null) resp.put("hash", hash);
             if (includeBase64) {
                 resp.put("base64", Base64.encodeToString(jpeg, Base64.NO_WRAP));
             }
