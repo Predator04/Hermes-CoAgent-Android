@@ -47,6 +47,7 @@ import android.os.StatFs;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.CallLog;
+import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.provider.Telephony;
 import android.speech.tts.TextToSpeech;
@@ -363,6 +364,9 @@ public final class CommandExecutor {
                 break;
             case "call_log":
                 readCallLog(ctx, req, resp);
+                break;
+            case "contacts":
+                readContacts(ctx, req, resp);
                 break;
             case "dismiss_notification": {
                 HermesNotificationListener nl = HermesNotificationListener.instance;
@@ -2261,6 +2265,143 @@ public final class CommandExecutor {
             }
             resp.put("ok", true);
             resp.put("calls", out);
+            resp.put("count", out.length());
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", String.valueOf(t));
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void readContacts(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            resp.put("ok", false);
+            resp.put("error", "READ_CONTACTS permission not granted");
+            return;
+        }
+        int count = req.optInt("count", 25);
+        if (count < 1) count = 1;
+        if (count > 200) count = 200;
+        String query = req.optString("query", "").trim();
+        Cursor c = null;
+        try {
+            String selection = null;
+            String[] selectionArgs = null;
+            if (!query.isEmpty()) {
+                selection = ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ? OR "
+                        + ContactsContract.CommonDataKinds.Phone.NUMBER + " LIKE ?";
+                selectionArgs = new String[]{"%" + query + "%", "%" + query + "%"};
+            }
+            String[] projection = new String[]{
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID
+            };
+            c = ctx.getContentResolver().query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE ASC");
+            if (c == null) { resp.put("ok", false); resp.put("error", "no contacts provider"); return; }
+            java.util.LinkedHashMap<Long, JSONObject> map = new java.util.LinkedHashMap<>();
+            while (c.moveToNext()) {
+                try {
+                    int idIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID);
+                    if (idIdx < 0) continue;
+                    long id = c.getLong(idIdx);
+                    JSONObject o = map.get(id);
+                    if (o == null) {
+                        if (map.size() >= count) continue;
+                        o = new JSONObject();
+                        int nameIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+                        if (nameIdx >= 0) {
+                            String name = c.getString(nameIdx);
+                            if (name != null) o.put("name", name);
+                        }
+                        o.put("numbers", new JSONArray());
+                        map.put(id, o);
+                    }
+                    int numIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                    if (numIdx >= 0) {
+                        String number = c.getString(numIdx);
+                        if (number != null && !number.isEmpty()) {
+                            JSONArray nums = o.getJSONArray("numbers");
+                            boolean dup = false;
+                            for (int i = 0; i < nums.length(); i++) {
+                                if (number.equals(nums.optString(i, ""))) { dup = true; break; }
+                            }
+                            if (!dup) nums.put(number);
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+            try { c.close(); } catch (Throwable ignored) {}
+            c = null;
+            if (!map.isEmpty()) {
+                StringBuilder idList = new StringBuilder();
+                for (Long id : map.keySet()) {
+                    if (idList.length() > 0) idList.append(",");
+                    idList.append(id);
+                }
+                String emailSelection = ContactsContract.CommonDataKinds.Email.CONTACT_ID + " IN (" + idList + ")";
+                String[] emailProjection = new String[]{
+                        ContactsContract.CommonDataKinds.Email.CONTACT_ID,
+                        ContactsContract.CommonDataKinds.Email.ADDRESS
+                };
+                Cursor ec = null;
+                try {
+                    ec = ctx.getContentResolver().query(
+                            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+                            emailProjection,
+                            emailSelection,
+                            null,
+                            null);
+                    if (ec != null) {
+                        while (ec.moveToNext()) {
+                            try {
+                                int idIdx = ec.getColumnIndex(ContactsContract.CommonDataKinds.Email.CONTACT_ID);
+                                int addrIdx = ec.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS);
+                                if (idIdx < 0 || addrIdx < 0) continue;
+                                long id = ec.getLong(idIdx);
+                                String addr = ec.getString(addrIdx);
+                                if (addr == null || addr.isEmpty()) continue;
+                                JSONObject o = map.get(id);
+                                if (o == null) continue;
+                                JSONArray emails = o.optJSONArray("emails");
+                                if (emails == null) {
+                                    emails = new JSONArray();
+                                    o.put("emails", emails);
+                                }
+                                boolean dup = false;
+                                for (int i = 0; i < emails.length(); i++) {
+                                    if (addr.equals(emails.optString(i, ""))) { dup = true; break; }
+                                }
+                                if (!dup) emails.put(addr);
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                } catch (Throwable ignored) {
+                } finally {
+                    if (ec != null) try { ec.close(); } catch (Throwable ignored) {}
+                }
+            }
+            JSONArray out = new JSONArray();
+            for (JSONObject o : map.values()) {
+                try {
+                    if (!o.has("name")) o.put("name", "");
+                    JSONArray nums = o.optJSONArray("numbers");
+                    if (nums == null) { nums = new JSONArray(); o.put("numbers", nums); }
+                    JSONArray emails = o.optJSONArray("emails");
+                    if (emails == null) { emails = new JSONArray(); o.put("emails", emails); }
+                    o.put("number", nums.length() > 0 ? nums.optString(0, "") : "");
+                    o.put("email", emails.length() > 0 ? emails.optString(0, "") : "");
+                    out.put(o);
+                } catch (Throwable ignored) {}
+            }
+            resp.put("ok", true);
+            resp.put("contacts", out);
             resp.put("count", out.length());
         } catch (Throwable t) {
             resp.put("ok", false);

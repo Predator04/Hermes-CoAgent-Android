@@ -161,6 +161,8 @@ public class MainActivity extends Activity {
     private Button smsPermBtn;
     private TextView callLogStatusView;
     private Button callLogPermBtn;
+    private TextView contactsStatusView;
+    private Button contactsPermBtn;
     private TextView notifAccessStatusView;
     private Button notifAccessBtn;
 
@@ -388,6 +390,38 @@ public class MainActivity extends Activity {
         callLogNote.setTextColor(COLOR_MUTED);
         callLogNote.setPadding(0, 0, 0, dp(8));
         settingsContent.addView(callLogNote);
+
+        // ─── Contacts ─────────────────────────────────────────────────────
+        TextView contactsLabel = new TextView(this);
+        contactsLabel.setText("Contacts");
+        contactsLabel.setTextSize(13);
+        contactsLabel.setTextColor(COLOR_TEXT);
+        contactsLabel.setTypeface(null, Typeface.BOLD);
+        contactsLabel.setPadding(0, dp(8), 0, dp(2));
+        settingsContent.addView(contactsLabel);
+
+        contactsStatusView = new TextView(this);
+        contactsStatusView.setTextSize(12);
+        contactsStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(contactsStatusView);
+
+        contactsPermBtn = new Button(this);
+        contactsPermBtn.setText("Allow contacts access");
+        contactsPermBtn.setOnClickListener(v -> requestContactsPermission());
+        styleButton(contactsPermBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams contactsBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        contactsBtnLp.setMargins(0, dp(8), 0, dp(4));
+        contactsPermBtn.setLayoutParams(contactsBtnLp);
+        settingsContent.addView(contactsPermBtn);
+
+        TextView contactsNote = new TextView(this);
+        contactsNote.setText("Lets the assistant look up people by name so it can call, text, or email them.");
+        contactsNote.setTextSize(11);
+        contactsNote.setTextColor(COLOR_MUTED);
+        contactsNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(contactsNote);
 
         // ─── Sensitive-content masking ─────────────────────────────────────
         Switch maskToggle = new Switch(this);
@@ -1381,6 +1415,10 @@ public class MainActivity extends Activity {
             renderCallLogStatus();
             Toast.makeText(this, isCallLogPermissionGranted() ? "Call log access granted" : "Call log access denied",
                     Toast.LENGTH_SHORT).show();
+        } else if (requestCode == REQ_CONTACTS) {
+            renderContactsStatus();
+            Toast.makeText(this, isContactsPermissionGranted() ? "Contacts access granted" : "Contacts access denied",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1559,6 +1597,7 @@ public class MainActivity extends Activity {
         renderBatteryStatus();
         renderSmsStatus();
         renderCallLogStatus();
+        renderContactsStatus();
         renderNotifAccessStatus();
     }
 
@@ -1596,6 +1635,7 @@ public class MainActivity extends Activity {
     // ─── SMS / notification-access settings ──────────────────────────────
     private static final int REQ_SMS = 5001;
     private static final int REQ_CALL_LOG = 5002;
+    private static final int REQ_CONTACTS = 5003;
 
     private boolean isSmsPermissionGranted() {
         return checkSelfPermission(Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -1628,6 +1668,22 @@ public class MainActivity extends Activity {
         callLogStatusView.setText(granted ? "Call history: Allowed" : "Call history: Not allowed");
         callLogStatusView.setTextColor(granted ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
         if (callLogPermBtn != null) callLogPermBtn.setVisibility(granted ? View.GONE : View.VISIBLE);
+    }
+
+    private boolean isContactsPermissionGranted() {
+        return checkSelfPermission(Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestContactsPermission() {
+        requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, REQ_CONTACTS);
+    }
+
+    private void renderContactsStatus() {
+        if (contactsStatusView == null) return;
+        boolean granted = isContactsPermissionGranted();
+        contactsStatusView.setText(granted ? "Contacts access: Allowed" : "Contacts access: Not allowed");
+        contactsStatusView.setTextColor(granted ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (contactsPermBtn != null) contactsPermBtn.setVisibility(granted ? View.GONE : View.VISIBLE);
     }
 
     private boolean isNotificationAccessEnabled() {
