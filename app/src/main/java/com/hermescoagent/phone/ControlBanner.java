@@ -39,7 +39,10 @@ public final class ControlBanner {
     private static final String COLOR_STOP_BG   = "#F85149";
     private static final String COLOR_STOP_EDGE = "#33FFFFFF";
 
+    private static final long IDLE_HIDE_MS = 15000L;
+
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable hideTask = this::hideInternal;
     private WindowManager wm;
 
     private View pillView;
@@ -55,29 +58,26 @@ public final class ControlBanner {
 
     public static ControlBanner get() { return INSTANCE; }
 
-    /** Show the bar + red pulsing dot for an active command. */
+    /** Show the bar + red pulsing dot for an active command. Cancels any
+     *  pending idle-hide so a burst of commands keeps the bar steady. */
     public static void showActive(Context ctx) {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.showInternal(ctx);
         INSTANCE.setActiveInternal(true);
     }
 
-    /** Show the bar in its persistent idle state (gray dot, no auto-hide).
-     *  Called when the remote-control foreground service starts so the bar
-     *  is visible for its entire lifetime, not only while a command runs. */
-    public static void showIdle(Context ctx) {
-        INSTANCE.showInternal(ctx);
-        INSTANCE.setActiveInternal(false);
-    }
-
-    /** Return the dot to gray while keeping the bar visible. Called at the
-     *  end of a non-stealth command. The bar is torn down only by
-     *  {@link #hide()} (stealth actions) or by service shutdown. */
+    /** Dot back to gray, then hide after {@link #IDLE_HIDE_MS} of no further
+     *  commands. Called at the end of a non-stealth command so the bar stays
+     *  up through a burst of activity but disappears once the agent goes idle. */
     public static void idle() {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.setActiveInternal(false);
+        INSTANCE.main.postDelayed(INSTANCE.hideTask, IDLE_HIDE_MS);
     }
 
     /** Immediately tear the bar down (stealth actions, service stop). */
     public static void hide() {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.hideInternal();
     }
 
