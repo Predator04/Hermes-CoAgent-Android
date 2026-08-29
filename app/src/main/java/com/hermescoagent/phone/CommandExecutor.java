@@ -502,6 +502,9 @@ public final class CommandExecutor {
             case "screen":
                 screen(ctx, req, resp);
                 break;
+            case "screen_timeout":
+                screenTimeout(ctx, req, resp);
+                break;
             case "wake":
                 wake(ctx, resp);
                 break;
@@ -2093,6 +2096,29 @@ public final class CommandExecutor {
                         m == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC ? "auto" : "manual");
             } catch (Throwable ignored) {}
 
+            resp.put("ok", true);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void screenTimeout(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            if (req.has("ms")) {
+                if (!Settings.System.canWrite(ctx)) {
+                    resp.put("ok", false);
+                    resp.put("error", "system settings write permission not granted");
+                    return;
+                }
+                int value = req.optInt("ms", 30000);
+                if (value < 5000) value = 5000;
+                if (value > 1800000) value = 1800000;
+                Settings.System.putInt(ctx.getContentResolver(),
+                        Settings.System.SCREEN_OFF_TIMEOUT, value);
+            }
+            int current = Settings.System.getInt(ctx.getContentResolver(),
+                    Settings.System.SCREEN_OFF_TIMEOUT, -1);
+            resp.put("ms", current);
             resp.put("ok", true);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
