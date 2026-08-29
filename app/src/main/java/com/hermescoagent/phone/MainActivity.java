@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
     private Switch remoteToggle;
     private TextView batteryStatusView;
     private Button batteryExemptBtn;
+    private LinearLayout batteryTopCard;
     private Button grantAccessibility;
     private Button startServer;
     private Button grantPermsButton;
@@ -268,6 +269,68 @@ public class MainActivity extends Activity {
         });
         styleButton(startServer, BtnStyle.PRIMARY);
         root.addView(startServer);
+
+        // ─── Prominent battery-exemption card ─────────────────────────────
+        // Hidden when the OS already exempts us. Otherwise this is the first
+        // thing the user sees, because OnePlus/OxygenOS silently kills the
+        // foreground service without it.
+        batteryTopCard = new LinearLayout(this);
+        batteryTopCard.setOrientation(LinearLayout.VERTICAL);
+        batteryTopCard.setBackgroundResource(R.drawable.bg_card);
+        batteryTopCard.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams battTopLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        battTopLp.setMargins(0, dp(16), 0, 0);
+        batteryTopCard.setLayoutParams(battTopLp);
+        applyGlassElevation(batteryTopCard, 20, 6);
+        batteryTopCard.setVisibility(isBatteryExempt() ? View.GONE : View.VISIBLE);
+
+        TextView battTopTitle = new TextView(this);
+        battTopTitle.setText("⚠  Battery optimization is restricting background control");
+        battTopTitle.setTextSize(14);
+        battTopTitle.setTextColor(COLOR_AMBER_SOFT);
+        battTopTitle.setTypeface(null, Typeface.BOLD);
+        batteryTopCard.addView(battTopTitle);
+
+        TextView battTopBody = new TextView(this);
+        battTopBody.setText("OnePlus may kill the remote service when the phone is idle. "
+                + "Allow unrestricted battery so the phone stays connected.");
+        battTopBody.setTextSize(12);
+        battTopBody.setTextColor(COLOR_TEXT);
+        LinearLayout.LayoutParams battTopBodyLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        battTopBodyLp.setMargins(0, dp(6), 0, 0);
+        battTopBody.setLayoutParams(battTopBodyLp);
+        batteryTopCard.addView(battTopBody);
+
+        Button battTopBtn = new Button(this);
+        battTopBtn.setText("Allow unrestricted battery");
+        battTopBtn.setOnClickListener(v -> requestBatteryExemption());
+        styleButton(battTopBtn, BtnStyle.PRIMARY);
+        batteryTopCard.addView(battTopBtn);
+
+        TextView oneplusHint = new TextView(this);
+        oneplusHint.setText("On OnePlus, also enable Auto launch: Settings → Battery → "
+                + "Power saving settings → App battery management → Hermes CoAgent → "
+                + "Allow auto launch.");
+        oneplusHint.setTextSize(11);
+        oneplusHint.setTextColor(COLOR_MUTED);
+        LinearLayout.LayoutParams oneplusHintLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        oneplusHintLp.setMargins(0, dp(10), 0, 0);
+        oneplusHint.setLayoutParams(oneplusHintLp);
+        batteryTopCard.addView(oneplusHint);
+
+        Button oneplusBtn = new Button(this);
+        oneplusBtn.setText("Open OnePlus battery settings");
+        oneplusBtn.setOnClickListener(v -> openOnePlusBatterySettings());
+        styleButton(oneplusBtn, BtnStyle.SECONDARY);
+        batteryTopCard.addView(oneplusBtn);
+
+        root.addView(batteryTopCard);
 
         // ─── Settings (collapsed) ──────────────────────────────────────────
         LinearLayout settingsContent = addCollapsibleSection(root, "Settings", false);
@@ -1623,13 +1686,41 @@ public class MainActivity extends Activity {
     }
 
     private void renderBatteryStatus() {
-        if (batteryStatusView == null) return;
         boolean exempt = isBatteryExempt();
-        batteryStatusView.setText(exempt ? "Background activity: Allowed" : "Background activity: Restricted");
-        batteryStatusView.setTextColor(exempt ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        if (batteryStatusView != null) {
+            batteryStatusView.setText(exempt ? "Background activity: Allowed" : "Background activity: Restricted");
+            batteryStatusView.setTextColor(exempt ? COLOR_GREEN_SOFT : COLOR_AMBER_SOFT);
+        }
         if (batteryExemptBtn != null) {
             batteryExemptBtn.setVisibility(exempt ? View.GONE : View.VISIBLE);
         }
+        if (batteryTopCard != null) {
+            batteryTopCard.setVisibility(exempt ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    /** Best-effort deep link to OnePlus/Oppo battery management, falling back
+     *  to the standard app-details page if the OEM activity isn't found. */
+    private void openOnePlusBatterySettings() {
+        Intent[] candidates = new Intent[]{
+                new Intent().setClassName("com.oplus.battery",
+                        "com.oplus.powermanager.fuelgaue.PowerConsumptionActivity"),
+                new Intent().setClassName("com.oplus.battery",
+                        "com.oplus.powermanager.PowerManagerActivity"),
+                new Intent().setClassName("com.coloros.powermanager",
+                        "com.coloros.powermanager.fuelgaue.PowerConsumptionActivity"),
+                new Intent().setClassName("com.oneplus.security",
+                        "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
+                new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(Uri.parse("package:" + getPackageName())),
+        };
+        for (Intent i : candidates) {
+            try {
+                startActivity(i);
+                return;
+            } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "Could not open battery settings", Toast.LENGTH_SHORT).show();
     }
 
     // ─── SMS / notification-access settings ──────────────────────────────
