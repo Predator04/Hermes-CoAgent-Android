@@ -204,6 +204,7 @@ public final class CommandExecutor {
             try { Thread.sleep(400); } catch (InterruptedException ignored) {}
             try {
                 RemoteRelayClient.setEnabled(ctx, false);
+                BootReceiver.setAutoStartEnabled(ctx, false);
                 try { RemoteRelayClient.get(ctx).stop(); } catch (Throwable ignored) {}
             } catch (Throwable ignored) {}
             try { ctx.stopService(new Intent(ctx, RemoteControlService.class)); } catch (Throwable ignored) {}

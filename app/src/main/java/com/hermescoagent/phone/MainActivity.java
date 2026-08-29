@@ -253,6 +253,7 @@ public class MainActivity extends Activity {
             } else {
                 Intent i = new Intent(this, RemoteControlService.class);
                 try {
+                    BootReceiver.setAutoStartEnabled(this, true);
                     if (Build.VERSION.SDK_INT >= 26) {
                         startForegroundService(i);
                     } else {
@@ -688,6 +689,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 client.setStatusListener(this::onRemoteStatusChanged);
+                BootReceiver.setAutoStartEnabled(this, true);
                 client.start();
             } else {
                 client.stop();
@@ -1601,6 +1603,7 @@ public class MainActivity extends Activity {
     private void stopRemoteControl() {
         try {
             RemoteRelayClient.setEnabled(this, false);
+            BootReceiver.setAutoStartEnabled(this, false);
             try { RemoteRelayClient.get(this).stop(); } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
         try {

@@ -270,6 +270,7 @@ public final class ControlBanner {
         // being torn down.
         try {
             RemoteRelayClient.setEnabled(app, false);
+            BootReceiver.setAutoStartEnabled(app, false);
             try { RemoteRelayClient.get(app).stop(); } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
         try {
