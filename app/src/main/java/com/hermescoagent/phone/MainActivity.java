@@ -1247,6 +1247,14 @@ public class MainActivity extends Activity {
                 null, null));
 
         addPermRow(content, new PermSpec(
+                PermissionPrefs.BT,
+                "Bluetooth",
+                "To toggle Bluetooth on or off and list paired devices via the bluetooth command.",
+                Build.VERSION_CODES.S,
+                new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                null, null));
+
+        addPermRow(content, new PermSpec(
                 PermissionPrefs.DND,
                 "DND access",
                 "So the `ring` command can play sound even when the phone is on silent or Do Not Disturb.",

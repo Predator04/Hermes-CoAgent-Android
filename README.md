@@ -107,6 +107,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `location` | — | GPS position (lat/lng/accuracy) |
 | `wifi` | — | Wi-Fi state + SSID |
 | `network` | — | Network connectivity: type, internet status, local IPs, Wi-Fi, cellular signal |
+| `bluetooth` | `on?` | Bluetooth state (enabled, name, discoverable, paired devices) and toggle on or off |
 | `charging` | — | Charging state |
 | `memory` | — | RAM usage: total/available/used MB, used %, low-memory flag, /proc/meminfo breakdown (buffers, cached, swap), and the service process heap |
 | `clipboard_get` | — | Read the clipboard *(Android 10+ restricts background reads)* |

@@ -7,6 +7,9 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -437,6 +440,9 @@ public final class CommandExecutor {
                 break;
             case "network":
                 fillNetwork(ctx, resp);
+                break;
+            case "bluetooth":
+                bluetooth(ctx, req, resp);
                 break;
             case "charging":
                 fillCharging(ctx, resp);
@@ -1204,6 +1210,82 @@ public final class CommandExecutor {
                 if (info.getBSSID() != null) resp.put("bssid", info.getBSSID());
                 resp.put("rssi", info.getRssi());
             }
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    // ───────────────────────────── bluetooth ─────────────────────────────
+
+    @SuppressWarnings("deprecation")
+    private static void bluetooth(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter adapter = bm == null ? null : bm.getAdapter();
+            if (adapter == null) {
+                resp.put("ok", false);
+                resp.put("error", "bluetooth not supported");
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= 31
+                    && ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
+                resp.put("ok", false);
+                resp.put("error", "bluetooth connect permission not granted");
+                return;
+            }
+
+            if (req.has("on")) {
+                if (req.optBoolean("on", false)) adapter.enable();
+                else adapter.disable();
+            }
+
+            resp.put("enabled", adapter.isEnabled());
+            String name = adapter.getName();
+            resp.put("name", name == null ? "" : name);
+
+            String discoverable;
+            switch (adapter.getScanMode()) {
+                case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
+                    discoverable = "discoverable"; break;
+                case BluetoothAdapter.SCAN_MODE_CONNECTABLE:
+                    discoverable = "connectable"; break;
+                default:
+                    discoverable = "none";
+            }
+            resp.put("discoverable", discoverable);
+
+            JSONArray paired = new JSONArray();
+            int connectedCount = 0;
+            java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+            if (bonded != null) {
+                for (BluetoothDevice d : bonded) {
+                    JSONObject o = new JSONObject();
+                    String dn = d.getName();
+                    o.put("name", dn == null ? "" : dn);
+                    o.put("address", d.getAddress() == null ? "" : d.getAddress());
+                    String bs;
+                    switch (d.getBondState()) {
+                        case BluetoothDevice.BOND_BONDED: bs = "bonded"; break;
+                        case BluetoothDevice.BOND_BONDING: bs = "bonding"; break;
+                        default: bs = "none";
+                    }
+                    o.put("bond_state", bs);
+                    boolean connected = false;
+                    try {
+                        Object state = BluetoothDevice.class
+                                .getMethod("getConnectionState")
+                                .invoke(d);
+                        connected = state instanceof Integer
+                                && ((Integer) state) == BluetoothAdapter.STATE_CONNECTED;
+                    } catch (Throwable ignored) {}
+                    o.put("connected", connected);
+                    if (connected) connectedCount++;
+                    paired.put(o);
+                }
+            }
+            resp.put("paired", paired);
+            resp.put("connected_count", connectedCount);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }

@@ -28,6 +28,7 @@ public final class PermissionPrefs {
     public static final String NOTIF_LISTENER = "notif_listener";
     public static final String BATT = "batt";
     public static final String OVERLAY = "overlay";
+    public static final String BT = "bt";
 
     private PermissionPrefs() {}
 
@@ -51,6 +52,7 @@ public final class PermissionPrefs {
         switch (key) {
             case BG_LOC: return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
             case POST_NOTIF: return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+            case BT: return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
             default: return true;
         }
     }
@@ -97,6 +99,10 @@ public final class PermissionPrefs {
             case OVERLAY:
                 return Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                         || Settings.canDrawOverlays(ctx);
+            case BT:
+                return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                        || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                        == PackageManager.PERMISSION_GRANTED;
         }
         return false;
     }
