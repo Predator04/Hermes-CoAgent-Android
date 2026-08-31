@@ -444,6 +444,9 @@ public final class CommandExecutor {
             case "bluetooth":
                 bluetooth(ctx, req, resp);
                 break;
+            case "dnd":
+                dnd(ctx, req, resp);
+                break;
             case "charging":
                 fillCharging(ctx, resp);
                 break;
@@ -1288,6 +1291,50 @@ public final class CommandExecutor {
             resp.put("connected_count", connectedCount);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    // ──────────────────────────────── dnd ────────────────────────────────
+
+    private static void dnd(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null || !nm.isNotificationPolicyAccessGranted()) {
+                resp.put("ok", false);
+                resp.put("error", "notification policy access not granted");
+                return;
+            }
+            if (req.has("set")) {
+                String v = req.optString("set", "").toLowerCase(Locale.US);
+                int filter;
+                switch (v) {
+                    case "all":      filter = NotificationManager.INTERRUPTION_FILTER_ALL; break;
+                    case "priority": filter = NotificationManager.INTERRUPTION_FILTER_PRIORITY; break;
+                    case "alarms":   filter = NotificationManager.INTERRUPTION_FILTER_ALARMS; break;
+                    case "none":     filter = NotificationManager.INTERRUPTION_FILTER_NONE; break;
+                    default:
+                        resp.put("ok", false);
+                        resp.put("error", "invalid set value: " + req.optString("set", ""));
+                        return;
+                }
+                nm.setInterruptionFilter(filter);
+            }
+            int current = nm.getCurrentInterruptionFilter();
+            resp.put("ok", true);
+            resp.put("code", current);
+            resp.put("filter", nameOfDndFilter(current));
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    private static String nameOfDndFilter(int filter) {
+        switch (filter) {
+            case NotificationManager.INTERRUPTION_FILTER_ALL:      return "all";
+            case NotificationManager.INTERRUPTION_FILTER_PRIORITY: return "priority";
+            case NotificationManager.INTERRUPTION_FILTER_ALARMS:   return "alarms";
+            case NotificationManager.INTERRUPTION_FILTER_NONE:     return "none";
+            default: return "unknown";
         }
     }
 
