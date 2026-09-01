@@ -101,6 +101,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 
 | Action | Params | What it does |
 |--------|--------|--------------|
+| `rotation` | `mode?` | Current screen orientation (rotation degrees, portrait/landscape, width/height) and lock to `portrait`/`landscape`/`reverse_portrait`/`reverse_landscape` or `auto` |
 | `battery` | — | Battery level + charging state |
 | `info` | — | Model, manufacturer, Android version, SDK |
 | `list_apps` | — | Installed launchable apps |

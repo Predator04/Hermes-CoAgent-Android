@@ -514,6 +514,9 @@ public final class CommandExecutor {
             case "screen_timeout":
                 screenTimeout(ctx, req, resp);
                 break;
+            case "rotation":
+                rotation(ctx, req, resp);
+                break;
             case "wake":
                 wake(ctx, resp);
                 break;
@@ -2249,6 +2252,74 @@ public final class CommandExecutor {
                     Settings.System.SCREEN_OFF_TIMEOUT, -1);
             resp.put("ms", current);
             resp.put("ok", true);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void rotation(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            android.content.ContentResolver resolver = ctx.getContentResolver();
+            if (req.has("mode")) {
+                if (!Settings.System.canWrite(ctx)) {
+                    resp.put("ok", false);
+                    resp.put("error", "system settings write permission not granted");
+                    return;
+                }
+                String mode = req.optString("mode", "").toLowerCase(Locale.US);
+                switch (mode) {
+                    case "portrait":
+                        Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 0);
+                        Settings.System.putInt(resolver, Settings.System.USER_ROTATION,
+                                android.view.Surface.ROTATION_0);
+                        break;
+                    case "landscape":
+                        Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 0);
+                        Settings.System.putInt(resolver, Settings.System.USER_ROTATION,
+                                android.view.Surface.ROTATION_90);
+                        break;
+                    case "reverse_portrait":
+                        Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 0);
+                        Settings.System.putInt(resolver, Settings.System.USER_ROTATION,
+                                android.view.Surface.ROTATION_180);
+                        break;
+                    case "reverse_landscape":
+                        Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 0);
+                        Settings.System.putInt(resolver, Settings.System.USER_ROTATION,
+                                android.view.Surface.ROTATION_270);
+                        break;
+                    case "auto":
+                        Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 1);
+                        break;
+                    default:
+                        resp.put("ok", false);
+                        resp.put("error", "invalid mode: " + req.optString("mode", ""));
+                        return;
+                }
+            }
+
+            int rotationDegrees = 0;
+            try {
+                WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+                if (wm != null && wm.getDefaultDisplay() != null) {
+                    switch (wm.getDefaultDisplay().getRotation()) {
+                        case android.view.Surface.ROTATION_90:  rotationDegrees = 90; break;
+                        case android.view.Surface.ROTATION_180: rotationDegrees = 180; break;
+                        case android.view.Surface.ROTATION_270: rotationDegrees = 270; break;
+                        default: rotationDegrees = 0;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            DisplayMetrics dm = readDisplayMetrics(ctx);
+            resp.put("rotation", rotationDegrees);
+            resp.put("orientation", dm.widthPixels < dm.heightPixels ? "portrait" : "landscape");
+            resp.put("auto_rotate",
+                    Settings.System.getInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 1) == 1);
+            resp.put("user_rotation",
+                    Settings.System.getInt(resolver, Settings.System.USER_ROTATION, 0));
+            resp.put("width", dm.widthPixels);
+            resp.put("height", dm.heightPixels);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }
