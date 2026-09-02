@@ -412,6 +412,22 @@ public final class CommandExecutor {
                 else return s.findAndTap(req.optString("query"));
                 break;
             }
+            case "telemetry": {
+                String pkg = req.optString("package", "");
+                if (req.optBoolean("clear", false)) {
+                    TelemetryStore.get(ctx).clear();
+                    resp.put("cleared", true);
+                } else {
+                    try {
+                        JSONObject t = TelemetryStore.get(ctx).bestStrategy(pkg.isEmpty() ? null : pkg);
+                        resp.put("telemetry", t);
+                    } catch (Exception e) {
+                        resp.put("ok", false);
+                        resp.put("error", "telemetry: " + e.getMessage());
+                    }
+                }
+                break;
+            }
 
             // ─── Group A: find-my-phone ────────────────────────────────────
             case "ring":

@@ -360,15 +360,21 @@ public class HermesAccessibilityService extends AccessibilityService {
      * up to MAX_FIND_MATCHES matches, or null if the tree dump failed.
      */
     public JSONArray findNodes(String query) throws JSONException {
+        long t0 = System.currentTimeMillis();
         JSONArray all = dumpNodes();
         if (all == null) return null;
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
         JSONArray out = new JSONArray();
+        String field = "";
         for (int i = 0; i < all.length() && out.length() < MAX_FIND_MATCHES; i++) {
             JSONObject n = all.optJSONObject(i);
             if (n == null) continue;
-            if (matches(n, q)) out.put(n);
+            if (matches(n, q)) {
+                if (field.isEmpty()) field = matchField(n, q);
+                out.put(n);
+            }
         }
+        logFindSafe(query, out.length() > 0, all.length(), field, t0);
         return out;
     }
 
@@ -377,11 +383,13 @@ public class HermesAccessibilityService extends AccessibilityService {
      * center. Returns a JSON response ready to send back to the client.
      */
     public JSONObject findAndTap(String query) throws JSONException {
+        long t0 = System.currentTimeMillis();
         JSONObject resp = new JSONObject();
         JSONArray all = dumpNodes();
         if (all == null) {
             resp.put("ok", false);
             resp.put("error", "dump timeout");
+            logFindSafe(query, false, 0, "", t0);
             return resp;
         }
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
@@ -413,6 +421,7 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (best == null) {
             resp.put("ok", false);
             resp.put("error", "no match");
+            logFindSafe(query, false, all.length(), "", t0);
             return resp;
         }
         JSONArray b = best.getJSONArray("bounds");
@@ -427,6 +436,7 @@ public class HermesAccessibilityService extends AccessibilityService {
         info.put("cy", cy);
         resp.put("ok", tapped);
         resp.put("tapped", info);
+        logFindSafe(query, tapped, all.length(), matchField(best, q), t0);
         return resp;
     }
 
@@ -435,6 +445,25 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (text.contains(lowerQuery)) return true;
         String desc = node.optString("desc", "").toLowerCase(Locale.ROOT);
         return desc.contains(lowerQuery);
+    }
+
+    /** Which field (text vs desc) satisfied the query, or "" if none. */
+    private static String matchField(JSONObject node, String lowerQuery) {
+        if (lowerQuery.isEmpty()) return "";
+        String text = node.optString("text", "").toLowerCase(Locale.ROOT);
+        if (text.contains(lowerQuery)) return "text";
+        String desc = node.optString("desc", "").toLowerCase(Locale.ROOT);
+        if (desc.contains(lowerQuery)) return "desc";
+        return "";
+    }
+
+    /** Fire-and-forget find telemetry; never throws into the caller. */
+    private void logFindSafe(String query, boolean success, int treeNodes, String field, long t0) {
+        try {
+            TelemetryStore.get(this).logFind(lastForegroundPackage, query, success,
+                    treeNodes, field, System.currentTimeMillis() - t0);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** Package name of the app in the active window, or "" if unknown. */

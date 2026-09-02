@@ -91,6 +91,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `dump` | — | Dump the UI tree (text, labels, bounds, clickable) — the agent's "eyes" |
 | `find` | `query` | Search the UI tree for text/label |
 | `find_tap` | `query` | Find a UI element by text and tap it |
+| `telemetry` | `package?`, `clear?` | Self-learning: per-app find success rate / tree size (learns which apps are accessibility-opaque). `clear:true` wipes the store |
 | `screenshot` | `scale?`, `quality?`, `max_edge?` | Screen capture → base64 JPEG in the response |
 | `foreground` | — | Report the current foreground app (package, activity class, window title) — the agent's cheap "where am I" check |
 | `snapshot` | — | Screen snapshot |
