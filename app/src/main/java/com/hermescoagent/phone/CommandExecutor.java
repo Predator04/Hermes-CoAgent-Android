@@ -597,6 +597,9 @@ public final class CommandExecutor {
             case "kill_background":
                 killBackground(ctx, req, resp);
                 break;
+            case "status":
+                fillStatus(ctx, resp);
+                break;
 
             default:
                 resp.put("ok", false);
@@ -3021,6 +3024,67 @@ public final class CommandExecutor {
         }
         resp.put("requested", requested);
         resp.put("method", method);
+    }
+
+    private static void fillStatus(Context ctx, JSONObject resp) {
+        try {
+            resp.put("accessibility", HermesAccessibilityService.instance != null);
+            resp.put("notification_listener", HermesNotificationListener.instance != null);
+            resp.put("foreground_service", RemoteControlService.isRunning);
+            resp.put("write_settings", Settings.System.canWrite(ctx));
+
+            try {
+                PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+                long versionCode;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    versionCode = info.getLongVersionCode();
+                } else {
+                    versionCode = info.versionCode;
+                }
+                resp.put("version_name", info.versionName == null ? "" : info.versionName);
+                resp.put("version_code", versionCode);
+            } catch (Exception ignored) {
+                resp.put("version_name", "");
+                resp.put("version_code", 0L);
+            }
+
+            JSONObject remote = new JSONObject();
+            try {
+                remote.put("enabled", RemoteRelayClient.isEnabled(ctx));
+                RemoteRelayClient client = RemoteRelayClient.get(ctx);
+                remote.put("status", client.status().name().toLowerCase(Locale.US));
+                String detail = client.statusDetail();
+                remote.put("detail", detail == null ? "" : detail);
+            } catch (Throwable t) {
+                remote.put("enabled", false);
+                remote.put("status", "off");
+                remote.put("detail", String.valueOf(t));
+            }
+            resp.put("remote_mode", remote);
+
+            String[] keys = {
+                    PermissionPrefs.LOC, PermissionPrefs.BG_LOC, PermissionPrefs.CAM,
+                    PermissionPrefs.MIC, PermissionPrefs.PHONE, PermissionPrefs.POST_NOTIF,
+                    PermissionPrefs.DND, PermissionPrefs.NOTIF_LISTENER, PermissionPrefs.BATT,
+                    PermissionPrefs.OVERLAY, PermissionPrefs.BT
+            };
+            JSONObject perms = new JSONObject();
+            for (String key : keys) {
+                JSONObject entry = new JSONObject();
+                try {
+                    entry.put("wanted", PermissionPrefs.wants(ctx, key));
+                    entry.put("granted", PermissionPrefs.isGranted(ctx, key));
+                    entry.put("enabled", PermissionPrefs.enabled(ctx, key));
+                    entry.put("applicable", PermissionPrefs.isApplicable(key));
+                } catch (Throwable ignored) {}
+                perms.put(key, entry);
+            }
+            resp.put("permissions", perms);
+
+            resp.put("ok", true);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
     }
 
     private static void appInfo(Context ctx, JSONObject req, JSONObject resp) throws Exception {
