@@ -289,6 +289,9 @@ public final class CommandExecutor {
                 resp.put("sdk", Build.VERSION.SDK_INT);
                 break;
             }
+            case "time":
+                fillTime(ctx, resp);
+                break;
             case "screen_size": {
                 DisplayMetrics dm = readDisplayMetrics(ctx);
                 resp.put("width", dm.widthPixels);
@@ -3075,6 +3078,49 @@ public final class CommandExecutor {
         }
         resp.put("requested", requested);
         resp.put("method", method);
+    }
+
+    // ──────────────────────────────── time ────────────────────────────────
+
+    private static void fillTime(Context ctx, JSONObject resp) {
+        try {
+            long now = System.currentTimeMillis();
+            resp.put("epoch_ms", now);
+
+            java.util.TimeZone tz = java.util.TimeZone.getDefault();
+            int tzOffsetMs = tz.getOffset(now);
+            resp.put("timezone", tz.getID());
+            resp.put("tz_offset_ms", tzOffsetMs);
+            resp.put("tz_offset_min", tzOffsetMs / 60000);
+
+            java.text.SimpleDateFormat utc =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            utc.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            resp.put("iso_utc", utc.format(new java.util.Date(now)));
+
+            java.text.SimpleDateFormat local =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+            local.setTimeZone(tz);
+            resp.put("iso_local", local.format(new java.util.Date(now)));
+
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            resp.put("hour", cal.get(java.util.Calendar.HOUR_OF_DAY));
+            resp.put("minute", cal.get(java.util.Calendar.MINUTE));
+
+            long uptime = android.os.SystemClock.elapsedRealtime();
+            resp.put("uptime_ms", uptime);
+            resp.put("boot_epoch_ms", now - uptime);
+
+            try {
+                resp.put("is_24h", android.text.format.DateFormat.is24HourFormat(ctx));
+            } catch (Throwable ignored) {
+                resp.put("is_24h", true);
+            }
+
+            resp.put("ok", true);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
     }
 
     private static void fillStatus(Context ctx, JSONObject resp) {

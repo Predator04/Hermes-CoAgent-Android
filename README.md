@@ -105,6 +105,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `rotation` | `mode?` | Current screen orientation (rotation degrees, portrait/landscape, width/height) and lock to `portrait`/`landscape`/`reverse_portrait`/`reverse_landscape` or `auto` |
 | `battery` | — | Battery level + charging state |
 | `info` | — | Model, manufacturer, Android version, SDK |
+| `time` | — | Device clock: epoch ms, UTC/local timestamps, timezone, uptime |
 | `list_apps` | — | Installed launchable apps |
 | `location` | — | GPS position (lat/lng/accuracy) |
 | `wifi` | — | Wi-Fi state + SSID |
