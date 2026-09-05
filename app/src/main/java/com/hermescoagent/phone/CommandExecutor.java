@@ -396,6 +396,12 @@ public final class CommandExecutor {
                 }
                 break;
             }
+            case "notification_tap": {
+                HermesNotificationListener nl = HermesNotificationListener.instance;
+                if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); }
+                else return nl.tap(ctx, req.optString("key", ""), req.optString("package", ""), req.optInt("action_index", -1));
+                break;
+            }
             case "privacy": {
                 if (req.has("on")) {
                     Redaction.setPrivacyOn(ctx, req.optBoolean("on", false));

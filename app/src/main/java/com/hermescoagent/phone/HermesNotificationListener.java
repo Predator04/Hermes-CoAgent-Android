@@ -1,6 +1,7 @@
 package com.hermescoagent.phone;
 
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -96,10 +97,109 @@ public class HermesNotificationListener extends NotificationListenerService {
                     o.put("title", Redaction.redactText(ctx, title));
                     o.put("text", Redaction.redactText(ctx, text));
                 }
+                if (n != null && n.actions != null && n.actions.length > 0) {
+                    JSONArray actions = new JSONArray();
+                    for (int i = 0; i < n.actions.length; i++) {
+                        Notification.Action action = n.actions[i];
+                        if (action == null) continue;
+                        JSONObject a = new JSONObject();
+                        a.put("index", i);
+                        a.put("title", Redaction.redactText(ctx, String.valueOf(action.title)));
+                        actions.put(a);
+                    }
+                    if (actions.length() > 0) o.put("actions", actions);
+                }
                 out.put(o);
             } catch (Throwable ignored) {}
         }
         return out;
+    }
+
+    /**
+     * Fire a notification's contentIntent (opens it) or one of its action
+     * button intents. actionIndex < 0 means "tap the notification body".
+     */
+    public JSONObject tap(Context ctx, String key, String pkg, int actionIndex) {
+        JSONObject resp = new JSONObject();
+        try {
+            StatusBarNotification[] active;
+            try {
+                active = getActiveNotifications();
+            } catch (Throwable t) {
+                active = null;
+            }
+            if (active == null || active.length == 0) {
+                resp.put("ok", false);
+                resp.put("error", "no active notifications");
+                return resp;
+            }
+
+            StatusBarNotification target = null;
+            if (key != null && !key.isEmpty()) {
+                for (StatusBarNotification sbn : active) {
+                    if (sbn != null && key.equals(sbn.getKey())) { target = sbn; break; }
+                }
+            } else if (pkg != null && !pkg.isEmpty()) {
+                for (StatusBarNotification sbn : active) {
+                    if (sbn != null && pkg.equals(sbn.getPackageName())) { target = sbn; break; }
+                }
+            }
+            if (target == null) {
+                resp.put("ok", false);
+                resp.put("error", "notification not found");
+                return resp;
+            }
+
+            Notification n = target.getNotification();
+            if (n == null) {
+                resp.put("ok", false);
+                resp.put("error", "notification has no payload");
+                return resp;
+            }
+
+            PendingIntent pi;
+            String what;
+            if (actionIndex >= 0) {
+                if (n.actions == null || actionIndex >= n.actions.length) {
+                    resp.put("ok", false);
+                    resp.put("error", "action index out of range");
+                    return resp;
+                }
+                pi = n.actions[actionIndex].actionIntent;
+                if (pi == null) {
+                    resp.put("ok", false);
+                    resp.put("error", "action intent missing");
+                    return resp;
+                }
+                what = "action";
+            } else {
+                pi = n.contentIntent;
+                if (pi == null) {
+                    resp.put("ok", false);
+                    resp.put("error", "no content intent");
+                    return resp;
+                }
+                what = "content";
+            }
+
+            try {
+                pi.send();
+                resp.put("ok", true);
+                resp.put("package", target.getPackageName());
+                resp.put("key", target.getKey());
+                resp.put("tapped", what);
+                resp.put("action_index", actionIndex);
+            } catch (Throwable t) {
+                resp.put("ok", false);
+                resp.put("error", String.valueOf(t));
+            }
+        } catch (Throwable t) {
+            try {
+                resp.put("ok", false);
+                resp.put("error", String.valueOf(t));
+            } catch (Throwable ignored) {}
+        }
+        return resp;
     }
 
     /** Cancel by exact SBN key. */
