@@ -128,6 +128,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "â€
 | `install_apk` | `url` | Download + install an APK (needs "Install unknown apps" granted once) |
 | `uninstall` | `package` | Uninstall a package |
 | `app_info` | `package` | Version / target SDK / install dates |
+| `packages` | `filter?` (`all`\|`third_party`\|`system`\|`updated`), `q?`, `limit?` | Full installed package inventory with label, version_name, version_code, first_install_ms, last_update_ms, system flag. Sorted by label. Default limit 500. |
 | `kill_background` | `package` | Kill a background process (foreground force-stop needs root) |
 
 ### Find-my-phone

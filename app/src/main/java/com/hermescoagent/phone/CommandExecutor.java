@@ -623,6 +623,9 @@ public final class CommandExecutor {
             case "app_info":
                 appInfo(ctx, req, resp);
                 break;
+            case "packages":
+                packagesList(ctx, req, resp);
+                break;
             case "kill_background":
                 killBackground(ctx, req, resp);
                 break;
@@ -3218,6 +3221,79 @@ public final class CommandExecutor {
             resp.put("ok", false);
             resp.put("error", String.valueOf(e));
         }
+    }
+
+    private static void packagesList(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        String filter = req.optString("filter", "all").toLowerCase(Locale.US);
+        String q = req.optString("q", "").toLowerCase(Locale.US);
+        int limit = req.optInt("limit", 500);
+        if (limit < 0) limit = 0;
+
+        final PackageManager pm = ctx.getPackageManager();
+        List<PackageInfo> all = pm.getInstalledPackages(0);
+        List<PackageInfo> matched = new ArrayList<>();
+        final java.util.HashMap<String, String> labels = new java.util.HashMap<>();
+
+        for (PackageInfo pi : all) {
+            ApplicationInfo ai = pi.applicationInfo;
+            int flags = ai == null ? 0 : ai.flags;
+            boolean isSystem = (flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+            boolean isUpdatedSystem = (flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+            switch (filter) {
+                case "third_party":
+                    if (isSystem) continue;
+                    break;
+                case "system":
+                    if (!isSystem) continue;
+                    break;
+                case "updated":
+                    if (!isUpdatedSystem) continue;
+                    break;
+                case "all":
+                default:
+                    break;
+            }
+            CharSequence lbl = ai != null ? ai.loadLabel(pm) : null;
+            String label = (lbl == null || lbl.length() == 0) ? pi.packageName : lbl.toString();
+            if (!q.isEmpty()) {
+                if (!pi.packageName.toLowerCase(Locale.US).contains(q)
+                        && !label.toLowerCase(Locale.US).contains(q)) continue;
+            }
+            labels.put(pi.packageName, label);
+            matched.add(pi);
+        }
+
+        Collections.sort(matched, new Comparator<PackageInfo>() {
+            @Override public int compare(PackageInfo a, PackageInfo b) {
+                return labels.get(a.packageName).compareToIgnoreCase(labels.get(b.packageName));
+            }
+        });
+
+        JSONArray arr = new JSONArray();
+        int n = Math.min(limit, matched.size());
+        for (int i = 0; i < n; i++) {
+            PackageInfo pi = matched.get(i);
+            ApplicationInfo ai = pi.applicationInfo;
+            int flags = ai == null ? 0 : ai.flags;
+            boolean isSystem = (flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+            long versionCode;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                versionCode = pi.getLongVersionCode();
+            } else {
+                versionCode = pi.versionCode;
+            }
+            JSONObject o = new JSONObject();
+            o.put("package", pi.packageName);
+            o.put("label", labels.get(pi.packageName));
+            o.put("version_name", pi.versionName == null ? "" : pi.versionName);
+            o.put("version_code", versionCode);
+            o.put("first_install_ms", pi.firstInstallTime);
+            o.put("last_update_ms", pi.lastUpdateTime);
+            o.put("system", isSystem);
+            arr.put(o);
+        }
+        resp.put("count", arr.length());
+        resp.put("packages", arr);
     }
 
     private static void killBackground(Context ctx, JSONObject req, JSONObject resp) throws Exception {
