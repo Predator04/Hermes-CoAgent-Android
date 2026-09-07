@@ -2,7 +2,9 @@ package com.hermescoagent.phone;
 
 import android.app.Notification;
 import android.app.PendingIntent;
+import android.app.RemoteInput;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -105,6 +107,10 @@ public class HermesNotificationListener extends NotificationListenerService {
                         JSONObject a = new JSONObject();
                         a.put("index", i);
                         a.put("title", Redaction.redactText(ctx, String.valueOf(action.title)));
+                        android.app.RemoteInput[] ri = action.getRemoteInputs();
+                        boolean replyable = ri != null && ri.length > 0;
+                        a.put("reply", replyable);
+                        if (replyable) a.put("reply_hint", String.valueOf(ri[0].getLabel()));
                         actions.put(a);
                     }
                     if (actions.length() > 0) o.put("actions", actions);
@@ -189,6 +195,123 @@ public class HermesNotificationListener extends NotificationListenerService {
                 resp.put("key", target.getKey());
                 resp.put("tapped", what);
                 resp.put("action_index", actionIndex);
+            } catch (Throwable t) {
+                resp.put("ok", false);
+                resp.put("error", String.valueOf(t));
+            }
+        } catch (Throwable t) {
+            try {
+                resp.put("ok", false);
+                resp.put("error", String.valueOf(t));
+            } catch (Throwable ignored) {}
+        }
+        return resp;
+    }
+
+    /**
+     * Reply inline to a messaging notification via its RemoteInput reply action.
+     * Looks up the notification by exact key or package (like tap()), then either
+     * uses the action at actionIndex (if >= 0) or the first replyable action.
+     */
+    public JSONObject reply(Context ctx, String key, String pkg, String text, int actionIndex) {
+        JSONObject resp = new JSONObject();
+        try {
+            if (text == null || text.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "text required");
+                return resp;
+            }
+
+            StatusBarNotification[] active;
+            try {
+                active = getActiveNotifications();
+            } catch (Throwable t) {
+                active = null;
+            }
+            if (active == null || active.length == 0) {
+                resp.put("ok", false);
+                resp.put("error", "no active notifications");
+                return resp;
+            }
+
+            StatusBarNotification target = null;
+            if (key != null && !key.isEmpty()) {
+                for (StatusBarNotification sbn : active) {
+                    if (sbn != null && key.equals(sbn.getKey())) { target = sbn; break; }
+                }
+            } else if (pkg != null && !pkg.isEmpty()) {
+                for (StatusBarNotification sbn : active) {
+                    if (sbn != null && pkg.equals(sbn.getPackageName())) { target = sbn; break; }
+                }
+            }
+            if (target == null) {
+                resp.put("ok", false);
+                resp.put("error", "notification not found");
+                return resp;
+            }
+
+            Notification n = target.getNotification();
+            if (n == null) {
+                resp.put("ok", false);
+                resp.put("error", "notification has no payload");
+                return resp;
+            }
+
+            Notification.Action action;
+            int chosenIndex;
+            if (actionIndex >= 0) {
+                if (n.actions == null || actionIndex >= n.actions.length) {
+                    resp.put("ok", false);
+                    resp.put("error", "action index out of range");
+                    return resp;
+                }
+                action = n.actions[actionIndex];
+                chosenIndex = actionIndex;
+            } else {
+                action = null;
+                chosenIndex = -1;
+                if (n.actions != null) {
+                    for (int i = 0; i < n.actions.length; i++) {
+                        Notification.Action candidate = n.actions[i];
+                        if (candidate == null) continue;
+                        RemoteInput[] cri = candidate.getRemoteInputs();
+                        if (cri != null && cri.length > 0) {
+                            action = candidate;
+                            chosenIndex = i;
+                            break;
+                        }
+                    }
+                }
+                if (action == null) {
+                    resp.put("ok", false);
+                    resp.put("error", "action has no reply input");
+                    return resp;
+                }
+            }
+
+            RemoteInput[] inputs = action.getRemoteInputs();
+            if (inputs == null || inputs.length == 0) {
+                resp.put("ok", false);
+                resp.put("error", "action has no reply input");
+                return resp;
+            }
+            if (action.actionIntent == null) {
+                resp.put("ok", false);
+                resp.put("error", "action intent missing");
+                return resp;
+            }
+
+            try {
+                Bundle results = new Bundle();
+                for (RemoteInput ri : inputs) results.putCharSequence(ri.getResultKey(), text);
+                Intent fill = new Intent();
+                RemoteInput.addResultsToIntent(inputs, fill, results);
+                action.actionIntent.send(ctx, 0, fill);
+                resp.put("ok", true);
+                resp.put("package", target.getPackageName());
+                resp.put("key", target.getKey());
+                resp.put("replied", true);
+                resp.put("action_index", chosenIndex);
             } catch (Throwable t) {
                 resp.put("ok", false);
                 resp.put("error", String.valueOf(t));

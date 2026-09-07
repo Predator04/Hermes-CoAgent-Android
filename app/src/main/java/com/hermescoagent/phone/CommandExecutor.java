@@ -402,6 +402,13 @@ public final class CommandExecutor {
                 else return nl.tap(ctx, req.optString("key", ""), req.optString("package", ""), req.optInt("action_index", -1));
                 break;
             }
+            case "reply_notification": {
+                HermesNotificationListener nl = HermesNotificationListener.instance;
+                if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); }
+                else return nl.reply(ctx, req.optString("key", ""), req.optString("package", ""),
+                        req.optString("text", ""), req.optInt("action_index", -1));
+                break;
+            }
             case "privacy": {
                 if (req.has("on")) {
                     Redaction.setPrivacyOn(ctx, req.optBoolean("on", false));
