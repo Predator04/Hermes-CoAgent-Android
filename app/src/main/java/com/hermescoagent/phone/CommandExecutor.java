@@ -38,6 +38,7 @@ import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.net.TrafficStats;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
@@ -47,6 +48,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.CallLog;
@@ -281,6 +283,9 @@ public final class CommandExecutor {
                 break;
             case "memory":
                 fillMemory(ctx, resp);
+                break;
+            case "data_usage":
+                fillDataUsage(ctx, resp);
                 break;
             case "info": {
                 resp.put("model", Build.MODEL);
@@ -1708,6 +1713,29 @@ public final class CommandExecutor {
                 if (cur != Integer.MIN_VALUE) resp.put("current_ua", cur);
             }
         } catch (Throwable ignored) {}
+    }
+
+    // ─────────────────────────────── data_usage ─────────────────────────────
+
+    private static void fillDataUsage(Context ctx, JSONObject resp) {
+        try {
+            long mobileRx = TrafficStats.getMobileRxBytes();
+            long mobileTx = TrafficStats.getMobileTxBytes();
+            long totalRx  = TrafficStats.getTotalRxBytes();
+            long totalTx  = TrafficStats.getTotalTxBytes();
+            long wifiRx   = Math.max(0L, totalRx - mobileRx);
+            long wifiTx   = Math.max(0L, totalTx - mobileTx);
+            long uptimeMs = SystemClock.elapsedRealtime();
+            resp.put("mobile_rx", mobileRx);
+            resp.put("mobile_tx", mobileTx);
+            resp.put("total_rx",  totalRx);
+            resp.put("total_tx",  totalTx);
+            resp.put("wifi_rx",   wifiRx);
+            resp.put("wifi_tx",   wifiTx);
+            resp.put("uptime_ms", uptimeMs);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
     }
 
     // ─────────────────────────────── storage ─────────────────────────────
