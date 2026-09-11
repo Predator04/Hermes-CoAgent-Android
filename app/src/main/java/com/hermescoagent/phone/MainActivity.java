@@ -357,6 +357,28 @@ public class MainActivity extends Activity {
         autoStartToggle.setOnCheckedChangeListener((btn, checked) ->
                 BootReceiver.setAutoStartEnabled(this, checked));
 
+        Switch keepAwakeToggle = new Switch(this);
+        keepAwakeToggle.setText("  Keep screen awake while controlling");
+        keepAwakeToggle.setTextColor(Color.WHITE);
+        keepAwakeToggle.setChecked(RemoteControlService.isKeepAwake(this));
+        LinearLayout.LayoutParams keepAwakeLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        keepAwakeLp.setMargins(0, dp(4), 0, 0);
+        keepAwakeToggle.setLayoutParams(keepAwakeLp);
+        settingsContent.addView(keepAwakeToggle);
+
+        TextView keepAwakeHint = new TextView(this);
+        keepAwakeHint.setText("Stops the screen from locking while remote control is running. "
+                + "Uses more battery — turn off for normal use.");
+        keepAwakeHint.setTextSize(11);
+        keepAwakeHint.setTextColor(COLOR_MUTED);
+        keepAwakeHint.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(keepAwakeHint);
+
+        keepAwakeToggle.setOnCheckedChangeListener((btn, checked) ->
+                RemoteControlService.setKeepAwake(this, checked));
+
         TextView batteryLabel = new TextView(this);
         batteryLabel.setText("Battery optimization");
         batteryLabel.setTextSize(13);

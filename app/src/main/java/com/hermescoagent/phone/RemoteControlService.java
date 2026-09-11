@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -50,6 +51,10 @@ public class RemoteControlService extends Service {
     private String authToken;
     /** True while the foreground service + HTTP server are up (for UI status). */
     public static volatile boolean isRunning = false;
+    /** Preference key: keep the screen awake while remote control is running. */
+    public static final String KEY_KEEP_AWAKE = "keep_screen_awake";
+    private static volatile RemoteControlService INSTANCE;
+    private PowerManager.WakeLock keepAwakeLock;
 
     @Override
     public void onCreate() {
@@ -58,6 +63,8 @@ public class RemoteControlService extends Service {
         // If a previous process was killed mid-ring, our DND filter and audio
         // volumes may be stuck in the "ringing" state. Restore them now.
         CommandExecutor.restoreCrashedRingState(this);
+        INSTANCE = this;
+        applyKeepAwake();
     }
 
     @Override
@@ -86,6 +93,46 @@ public class RemoteControlService extends Service {
         t = sb.toString();
         sp.edit().putString(KEY_TOKEN, t).apply();
         return t;
+    }
+
+    /** Whether "keep screen awake during remote control" is enabled. */
+    public static boolean isKeepAwake(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_KEEP_AWAKE, false);
+    }
+
+    /** Persist the keep-awake preference and apply it to the running service. */
+    public static void setKeepAwake(Context ctx, boolean value) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_KEEP_AWAKE, value).apply();
+        RemoteControlService s = INSTANCE;
+        if (s != null) s.applyKeepAwake();
+    }
+
+    /** Acquire/release the screen-on wakelock to match the current preference. */
+    private void applyKeepAwake() {
+        boolean want = isKeepAwake(this);
+        if (want && keepAwakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                try {
+                    @SuppressWarnings("deprecation")
+                    PowerManager.WakeLock wl = pm.newWakeLock(
+                            PowerManager.FULL_WAKE_LOCK, "hermes:keep_awake");
+                    wl.acquire();
+                    keepAwakeLock = wl;
+                } catch (Throwable ignored) {}
+            }
+        } else if (!want && keepAwakeLock != null) {
+            releaseKeepAwake();
+        }
+    }
+
+    private void releaseKeepAwake() {
+        if (keepAwakeLock != null) {
+            try { keepAwakeLock.release(); } catch (Throwable ignored) {}
+            keepAwakeLock = null;
+        }
     }
 
     private void startForeground() {
@@ -253,6 +300,8 @@ public class RemoteControlService extends Service {
     public void onDestroy() {
         running = false;
         isRunning = false;
+        INSTANCE = null;
+        releaseKeepAwake();
         try { ControlBanner.hide(); } catch (Throwable ignored) {}
         try { if (server != null) server.close(); } catch (Exception ignored) {}
         server = null;

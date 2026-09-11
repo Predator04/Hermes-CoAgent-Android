@@ -82,6 +82,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "â€
 | `scroll` | `direction` | Scroll the focused scrollable (`up`/`down`) |
 | `wait` | `for`, `until`, `timeout_ms?` | Wait until text appears/disappears in the UI |
 | `wake` | â€” | Wake the screen |
+| `keep_awake` | `on?` | Hold the screen awake (no lock) while remote control runs. `on:true/false` to set; omit to read current state. Opt-in via Settings toggle |
 | `screen` | `on?`, `brightness?`, `brightness_mode?` | Display state (on, locked, secure) plus wake/sleep and brightness get/set |
 
 ### Seeing the screen

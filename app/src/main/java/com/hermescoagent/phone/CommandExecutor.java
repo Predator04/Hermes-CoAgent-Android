@@ -561,6 +561,9 @@ public final class CommandExecutor {
             case "wake":
                 wake(ctx, resp);
                 break;
+            case "keep_awake":
+                keepAwake(ctx, req, resp);
+                break;
             case "log":
                 resp.put("log", snapshotLog());
                 break;
@@ -2423,6 +2426,18 @@ public final class CommandExecutor {
             resp.put("screen_on", screenOn);
             resp.put("keyguard_dismissed", dismissed);
         } catch (Exception ignored) {}
+    }
+
+    private static void keepAwake(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            if (req.has("on")) {
+                RemoteControlService.setKeepAwake(ctx, req.optBoolean("on", false));
+            }
+            resp.put("ok", true);
+            resp.put("keep_awake", RemoteControlService.isKeepAwake(ctx));
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
     }
 
     // ─────────────────────────────── log ─────────────────────────────────
