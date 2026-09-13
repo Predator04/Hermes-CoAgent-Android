@@ -540,6 +540,63 @@ public final class CommandExecutor {
                 }
                 break;
             }
+            case "scroll_find": {
+                try {
+                    String query = req.optString("query", "");
+                    if (query.isEmpty()) {
+                        resp.put("ok", false);
+                        resp.put("error", "query required");
+                        break;
+                    }
+                    HermesAccessibilityService s = HermesAccessibilityService.instance;
+                    if (s == null) {
+                        resp.put("ok", false);
+                        resp.put("error", "accessibility not enabled");
+                        break;
+                    }
+                    String dir = req.optString("direction", "down").toLowerCase();
+                    boolean forward = dir.equals("down") || dir.equals("forward");
+                    int maxScrolls = Math.max(1, Math.min(50, req.optInt("max_scrolls", 10)));
+                    boolean tap = req.optBoolean("tap", false);
+
+                    JSONArray matches = s.findNodes(query);
+                    boolean found = matches != null && matches.length() > 0;
+                    int scrolls = 0;
+                    boolean atEdge = false;
+                    if (!found) {
+                        for (int i = 0; i < maxScrolls; i++) {
+                            JSONObject r = s.scrollWithState(forward);
+                            scrolls++;
+                            boolean moved = r.optBoolean("moved", false);
+                            atEdge = r.optBoolean("at_edge", false);
+                            matches = s.findNodes(query);
+                            found = matches != null && matches.length() > 0;
+                            if (found) break;
+                            if (atEdge || !moved) break;
+                        }
+                    }
+                    if (!found) {
+                        matches = s.findNodes(query);
+                        found = matches != null && matches.length() > 0;
+                    }
+                    resp.put("found", found);
+                    resp.put("scrolls", scrolls);
+                    resp.put("at_edge", atEdge);
+                    resp.put("count", matches == null ? 0 : matches.length());
+                    if (tap) {
+                        boolean tapped = false;
+                        if (found) {
+                            JSONObject tapResp = s.findAndTap(query);
+                            tapped = tapResp.optBoolean("ok", false);
+                        }
+                        resp.put("tapped", tapped);
+                    }
+                } catch (Exception e) {
+                    resp.put("ok", false);
+                    resp.put("error", String.valueOf(e));
+                }
+                break;
+            }
             case "clipboard_get":
                 clipboardGet(ctx, resp);
                 break;
