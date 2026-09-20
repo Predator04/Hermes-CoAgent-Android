@@ -292,6 +292,11 @@ public final class CommandExecutor {
                 resp.put("manufacturer", Build.MANUFACTURER);
                 resp.put("android", Build.VERSION.RELEASE);
                 resp.put("sdk", Build.VERSION.SDK_INT);
+                try {
+                    resp.put("device_id", RemoteRelayClient.ensureDeviceId(ctx));
+                } catch (Throwable ignored) {
+                    resp.put("device_id", "");
+                }
                 break;
             }
             case "time":
