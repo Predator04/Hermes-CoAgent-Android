@@ -440,6 +440,96 @@ public class HermesAccessibilityService extends AccessibilityService {
         return resp;
     }
 
+    /**
+     * Find the best matching node for the query and toggle it via
+     * ACTION_CLICK, reporting checked state before and after so callers can
+     * decide switch/checkbox/radio state without a screenshot.
+     */
+    public JSONObject toggle(String query) throws JSONException {
+        JSONObject resp = new JSONObject();
+        JSONArray all = dumpNodes();
+        if (all == null) { resp.put("ok", false); resp.put("error", "dump timeout"); return resp; }
+        String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
+        JSONObject best = null;
+        JSONObject firstMatch = null;
+        long bestArea = Long.MAX_VALUE;
+        boolean bestClickable = false;
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject n = all.optJSONObject(i);
+            if (n == null || !matches(n, q)) continue;
+            if (firstMatch == null) firstMatch = n;
+            JSONArray b = n.optJSONArray("bounds");
+            if (b == null || b.length() < 4) continue;
+            long area = (long)(b.optInt(2) - b.optInt(0)) * (long)(b.optInt(3) - b.optInt(1));
+            if (area <= 0) continue;
+            boolean clickable = n.optBoolean("clickable", false);
+            boolean better;
+            if (best == null) better = true;
+            else if (clickable && !bestClickable) better = true;
+            else if (clickable == bestClickable && area < bestArea) better = true;
+            else better = false;
+            if (better) { best = n; bestArea = area; bestClickable = clickable; }
+        }
+        if (best == null) best = firstMatch;
+        if (best == null) { resp.put("ok", false); resp.put("error", "no matching node"); return resp; }
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) { resp.put("ok", false); resp.put("error", "no active window"); return resp; }
+        int targetIndex = best.optInt("id", -1);
+        final AccessibilityNodeInfo[] found = new AccessibilityNodeInfo[1];
+        walkLiveNode(root, 0, targetIndex, 0, found);
+        AccessibilityNodeInfo node = found[0];
+        if (node == null) { resp.put("ok", false); resp.put("error", "node vanished"); return resp; }
+        boolean wasChecked = node.isChecked();
+        boolean checkable = node.isCheckable();
+        if (!checkable && !node.isClickable()) {
+            resp.put("ok", false); resp.put("error", "not checkable"); return resp;
+        }
+        boolean toggled = node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        boolean nowChecked = node.isChecked();
+        resp.put("ok", true);
+        resp.put("query", query);
+        resp.put("toggled", toggled);
+        resp.put("was_checked", wasChecked);
+        resp.put("now_checked", nowChecked);
+        resp.put("text", best.optString("text", best.optString("desc", "")));
+        return resp;
+    }
+
+    // Walk the live AccessibilityNodeInfo tree in the same pre-order as
+    // dumpNodes so an "id" from the dump maps to a real node. Depth and node
+    // caps mirror walkNode so indices stay aligned even in dense trees.
+    private void walkLiveNode(AccessibilityNodeInfo n, int index, int targetIndex,
+                              int depth, AccessibilityNodeInfo[] out) {
+        if (n == null || out[0] != null) return;
+        if (index >= MAX_DUMP_NODES) return;
+        if (index == targetIndex) { out[0] = n; return; }
+        if (depth >= MAX_DUMP_DEPTH) return;
+        int childIndex = index + 1;
+        int cc = n.getChildCount();
+        for (int i = 0; i < cc && out[0] == null; i++) {
+            if (childIndex >= MAX_DUMP_NODES) return;
+            AccessibilityNodeInfo child = n.getChild(i);
+            if (child == null) continue;
+            walkLiveNode(child, childIndex, targetIndex, depth + 1, out);
+            if (out[0] != null) return;
+            childIndex += countSubtree(child, depth + 1) + 1;
+        }
+    }
+
+    private int countSubtree(AccessibilityNodeInfo n, int depth) {
+        if (n == null) return 0;
+        if (depth >= MAX_DUMP_DEPTH) return 0;
+        int total = 0;
+        int cc = n.getChildCount();
+        for (int i = 0; i < cc; i++) {
+            AccessibilityNodeInfo child = n.getChild(i);
+            if (child == null) continue;
+            total += 1 + countSubtree(child, depth + 1);
+            if (total >= MAX_DUMP_NODES) return MAX_DUMP_NODES;
+        }
+        return total;
+    }
+
     private static boolean matches(JSONObject node, String lowerQuery) {
         String text = node.optString("text", "").toLowerCase(Locale.ROOT);
         if (text.contains(lowerQuery)) return true;

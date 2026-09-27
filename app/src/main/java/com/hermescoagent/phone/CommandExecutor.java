@@ -442,6 +442,12 @@ public final class CommandExecutor {
                 else return s.findAndTap(req.optString("query"));
                 break;
             }
+            case "toggle": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else return s.toggle(req.optString("query"));
+                break;
+            }
             case "telemetry": {
                 String pkg = req.optString("package", "");
                 if (req.optBoolean("clear", false)) {
