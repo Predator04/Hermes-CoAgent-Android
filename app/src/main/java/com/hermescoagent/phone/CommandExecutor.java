@@ -406,6 +406,12 @@ public final class CommandExecutor {
                 }
                 break;
             }
+            case "notify":
+                notifyPush(ctx, req, resp);
+                break;
+            case "notify_cancel":
+                notifyCancel(ctx, req, resp);
+                break;
             case "notification_tap": {
                 HermesNotificationListener nl = HermesNotificationListener.instance;
                 if (nl == null) { resp.put("ok", false); resp.put("error", "notification access not enabled"); }
@@ -858,6 +864,76 @@ public final class CommandExecutor {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.cancel(RING_NOTIF_ID);
         } catch (Throwable ignored) {}
+    }
+
+    /** Posts a local notification so the controlling agent can alert the user. */
+    private static void notifyPush(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        try {
+            String title = req.optString("title", "");
+            String message = req.optString("message", "");
+            if (title.isEmpty() && message.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "title or message required");
+                return;
+            }
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) { resp.put("ok", false); resp.put("error", "no notification manager"); return; }
+
+            int id = req.optInt("id", 0);
+            if (id == 0) id = (int) (System.currentTimeMillis() & 0x7fffffff);
+
+            Notification n;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(
+                        "hermes_alerts", "Hermes Alerts",
+                        NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("Alerts sent by your Hermes agent");
+                nm.createNotificationChannel(ch);
+                n = new Notification.Builder(ctx, "hermes_alerts")
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setContentTitle(title.isEmpty() ? "Hermes" : title)
+                        .setContentText(message)
+                        .setCategory(Notification.CATEGORY_MESSAGE)
+                        .setVisibility(Notification.VISIBILITY_PUBLIC)
+                        .setAutoCancel(true)
+                        .build();
+            } else {
+                n = new Notification.Builder(ctx)
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setContentTitle(title.isEmpty() ? "Hermes" : title)
+                        .setContentText(message)
+                        .setPriority(Notification.PRIORITY_HIGH)
+                        .setAutoCancel(true)
+                        .build();
+            }
+            nm.notify(id, n);
+            resp.put("ok", true);
+            resp.put("id", id);
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", "notify failed: " + t.getMessage());
+        }
+    }
+
+    /** Cancels a notification previously posted by the notify action. */
+    private static void notifyCancel(Context ctx, JSONObject req, JSONObject resp) throws Exception {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            int id = req.optInt("id", 0);
+            if (nm == null) { resp.put("ok", false); resp.put("error", "no notification manager"); return; }
+            if (id == 0) {
+                nm.cancelAll();
+                resp.put("ok", true);
+                resp.put("cancelled", "all");
+            } else {
+                nm.cancel(id);
+                resp.put("ok", true);
+                resp.put("id", id);
+            }
+        } catch (Throwable t) {
+            resp.put("ok", false);
+            resp.put("error", "notify_cancel failed: " + t.getMessage());
+        }
     }
 
     private static void scheduleFindPhoneAutoStop(Context ctx) {
