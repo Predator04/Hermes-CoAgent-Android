@@ -610,6 +610,8 @@ public class HermesAccessibilityService extends AccessibilityService {
      *   quality       (int,    default 60)    — JPEG quality 1..100
      *   max_edge      (int,    default 1080)  — cap for the longest edge (0 = no cap)
      *   include_base64(boolean,default true)  — embed base64 JPEG in the response
+     *   x, y, width, height (int, all-or-none, optional) — crop to this rectangle
+     *       (original screen pixels) before resizing; out-of-bounds values ignored
      *
      * Pass {@code max_edge=0} (and typically {@code scale=1.0}) to bypass the
      * optimized-frame path and get a full-resolution capture.
@@ -694,6 +696,29 @@ public class HermesAccessibilityService extends AccessibilityService {
             return resp;
         }
 
+        int fullW = bmp.getWidth();
+        int fullH = bmp.getHeight();
+
+        // Optional region crop: capture only a rectangle of the screen so an
+        // agent can grab a small area (notification, verification code) at
+        // higher effective resolution with a smaller payload.
+        boolean cropped = false;
+        int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
+        if (opts.has("x") && opts.has("y") && opts.has("width") && opts.has("height")) {
+            cropX = opts.optInt("x", 0);
+            cropY = opts.optInt("y", 0);
+            cropW = opts.optInt("width", 0);
+            cropH = opts.optInt("height", 0);
+            if (cropW > 0 && cropH > 0
+                    && cropX >= 0 && cropY >= 0
+                    && cropX + cropW <= bmp.getWidth() && cropY + cropH <= bmp.getHeight()) {
+                Bitmap croppedBmp = Bitmap.createBitmap(bmp, cropX, cropY, cropW, cropH);
+                bmp.recycle();
+                bmp = croppedBmp;
+                cropped = true;
+            }
+        }
+
         int origW = bmp.getWidth();
         int origH = bmp.getHeight();
 
@@ -743,8 +768,16 @@ public class HermesAccessibilityService extends AccessibilityService {
             resp.put("path", out.getAbsolutePath());
             resp.put("width", toEncode.getWidth());
             resp.put("height", toEncode.getHeight());
-            resp.put("orig_width", origW);
-            resp.put("orig_height", origH);
+            resp.put("orig_width", fullW);
+            resp.put("orig_height", fullH);
+            if (cropped) {
+                JSONObject cropObj = new JSONObject();
+                cropObj.put("x", cropX);
+                cropObj.put("y", cropY);
+                cropObj.put("width", cropW);
+                cropObj.put("height", cropH);
+                resp.put("crop", cropObj);
+            }
             resp.put("format", "jpeg");
             resp.put("quality", quality);
             resp.put("scale", scale);
