@@ -34,6 +34,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -1752,8 +1753,8 @@ public class MainActivity extends Activity {
                 .setTitle("Update Available")
                 .setMessage(msg)
                 .setPositiveButton("Update Now", (d, w) -> {
-                    UpdateChecker.downloadAndInstall(MainActivity.this, apkUrl);
                     d.dismiss();
+                    startUpdateDownload(apkUrl);
                 })
                 .setNeutralButton("Skip This Version", (d, w) -> {
                     UpdateChecker.skipVersion(MainActivity.this, latestCode);
@@ -1769,6 +1770,56 @@ public class MainActivity extends Activity {
                 .replaceAll("(?m)^#+\\s*", "")
                 .replaceAll("(?m)^\\s*-\\s*", "• ")
                 .trim();
+    }
+
+    private void startUpdateDownload(String apkUrl) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(20), dp(24), dp(8));
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        bar.setIndeterminate(true);
+        TextView label = new TextView(this);
+        label.setText("Downloading…");
+        label.setTextColor(COLOR_MUTED);
+        label.setPadding(0, dp(12), 0, 0);
+        box.addView(bar);
+        box.addView(label);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Downloading update")
+                .setView(box)
+                .setCancelable(false)
+                .show();
+
+        UpdateChecker.downloadAndInstall(this, apkUrl, new UpdateChecker.ProgressCallback() {
+            @Override
+            public void onProgress(long downloaded, long total, double bps) {
+                if (total > 0) {
+                    bar.setIndeterminate(false);
+                    bar.setProgress((int) (downloaded * 100 / total));
+                    label.setText(formatBytes(downloaded) + " / " + formatBytes(total)
+                            + "  •  " + formatBytes((long) bps) + "/s");
+                } else {
+                    label.setText(formatBytes(downloaded) + "  •  " + formatBytes((long) bps) + "/s");
+                }
+            }
+
+            @Override
+            public void onComplete(boolean success) {
+                dialog.dismiss();
+                if (!success) {
+                    Toast.makeText(MainActivity.this, "Download failed — try again", Toast.LENGTH_SHORT).show();
+                }
+                // on success the install intent has already fired
+            }
+        });
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0);
+        return String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
     private void onRemoteStatusChanged(RemoteRelayClient.Status s, String detail) {

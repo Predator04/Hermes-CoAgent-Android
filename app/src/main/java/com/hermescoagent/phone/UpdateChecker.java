@@ -26,6 +26,11 @@ public final class UpdateChecker {
         void onResult(boolean available, int latestVersionCode, String releaseName, String apkUrl, String notes);
     }
 
+    public interface ProgressCallback {
+        void onProgress(long downloadedBytes, long totalBytes, double bytesPerSec);
+        void onComplete(boolean success);
+    }
+
     private static final String PREFS = "hermes_updates";
     private static final String KEY_LAST_CHECK = "last_update_check_ms";
     private static final String KEY_SKIPPED = "skipped_version_code";
@@ -115,13 +120,18 @@ public final class UpdateChecker {
     }
 
     public static void downloadAndInstall(Context ctx, String apkUrl) {
+        downloadAndInstall(ctx, apkUrl, null);
+    }
+
+    public static void downloadAndInstall(Context ctx, String apkUrl, ProgressCallback cb) {
         if (apkUrl == null || apkUrl.isEmpty()) return;
         Context app = ctx.getApplicationContext();
+        Handler main = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
                 File dir = new File(app.getCacheDir(), "updates");
-                if (!dir.exists() && !dir.mkdirs()) return;
+                if (!dir.exists() && !dir.mkdirs()) { postComplete(main, cb, false); return; }
                 File apk = new File(dir, "app-release.apk");
                 if (apk.exists()) apk.delete();
 
@@ -134,13 +144,30 @@ public final class UpdateChecker {
                 conn.connect();
 
                 int code = conn.getResponseCode();
-                if (code < 200 || code >= 300) return;
+                if (code < 200 || code >= 300) { postComplete(main, cb, false); return; }
+
+                long total = conn.getContentLengthLong(); // -1 if unknown
+                long downloaded = 0;
+                long start = System.currentTimeMillis();
+                long lastReport = 0;
 
                 try (InputStream in = conn.getInputStream();
                      FileOutputStream out = new FileOutputStream(apk)) {
                     byte[] buf = new byte[16384];
                     int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                        downloaded += n;
+                        long now = System.currentTimeMillis();
+                        if (now - lastReport >= 200) {
+                            lastReport = now;
+                            double elapsed = Math.max(1, now - start) / 1000.0;
+                            double bps = downloaded / elapsed;
+                            final long dl = downloaded;
+                            final double sp = bps;
+                            main.post(() -> { if (cb != null) cb.onProgress(dl, total, sp); });
+                        }
+                    }
                     out.flush();
                 }
 
@@ -151,13 +178,19 @@ public final class UpdateChecker {
                 intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                         | Intent.FLAG_ACTIVITY_NEW_TASK);
                 app.startActivity(intent);
+                postComplete(main, cb, true);
             } catch (Exception ignored) {
+                postComplete(main, cb, false);
             } finally {
                 if (conn != null) {
                     try { conn.disconnect(); } catch (Exception ignored) {}
                 }
             }
         }, "UpdateDownloader").start();
+    }
+
+    private static void postComplete(Handler main, ProgressCallback cb, boolean ok) {
+        main.post(() -> { if (cb != null) cb.onComplete(ok); });
     }
 
     private static String httpGet(String urlStr) {
