@@ -86,6 +86,9 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `screen` | `on?`, `brightness?`, `brightness_mode?` | Display state (on, locked, secure) plus wake/sleep and brightness get/set |
 | `scroll_find` | `query`, `direction?`, `max_scrolls?`, `tap?` | Scroll (up to `max_scrolls`, default 10) until `query` text is found; optional `tap:true` taps it |
 | `toggle` | `query` | Toggle a UI switch/checkbox found by text |
+| `set_text` | `query`, `text` | Type directly into a specific field found by query (ACTION_SET_TEXT — no tap/focus needed) |
+| `expand` | `query` | Expand a collapsible node (accordion, dropdown) found by query |
+| `collapse` | `query` | Collapse an expanded node found by query |
 | `done` | — | Explicit "task complete" signal: stops the pulsing glow + hides the overlay so the owner knows the agent is finished |
 
 ### Seeing the screen
@@ -97,6 +100,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `find_tap` | `query` | Find a UI element by text and tap it |
 | `telemetry` | `package?`, `clear?` | Self-learning: per-app find success rate / tree size (learns which apps are accessibility-opaque). `clear:true` wipes the store |
 | `screenshot` | `scale?`, `quality?`, `max_edge?`, `x?`,`y?`,`width?`,`height?` | Screen capture → base64 JPEG. Pass all four of `x`/`y`/`width`/`height` to crop a region (notification, OTP) at full resolution |
+| `ocr` | — | On-device text recognition (ML Kit) on a screenshot → full text + per-line bounding boxes. Reads text in apps whose accessibility tree is empty |
 | `foreground` | — | Report the current foreground app (package, activity class, window title) — the agent's cheap "where am I" check |
 | `snapshot` | — | Screen snapshot |
 | `watch` | `duration?`, `interval?` | Stream scaled screenshots to the relay (`/frame`) for near-live viewing — `duration` 1–60s (default 20), `interval` 0.5–5s (default 1.5) |
@@ -132,6 +136,15 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `sms` | `count?` | Read the most recent inbox SMS (default 20, max 100; needs READ_SMS) |
 | `sms_send` | `to`, `text` | Send an SMS (needs SEND_SMS) |
 | `latest_code` | — | Pull the most recent OTP/verification code from SMS (4–8 digit match + code/verify/otp keyword) |
+
+### Privileged shell (Shizuku)
+
+| Action | Params | What it does |
+|--------|--------|--------------|
+| `shell` | `command` | Run a privileged shell command with adb/root identity (`settings`, `pm`, `dumpsys`, …). Requires the Shizuku app installed + started + permission granted |
+| `shizuku` | — | Shizuku status (`available`, `granted`) |
+
+> **Setup:** install the free [Shizuku](https://shizuku.rikka.app/download/) app, start it via wireless debugging (Developer options), then in CoAgent → Settings → "Enable Shizuku" to grant permission. Without Shizuku, `shell` returns a friendly error.
 
 ### Files & apps
 
