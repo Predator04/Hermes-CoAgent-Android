@@ -49,6 +49,8 @@ public final class ControlBanner {
     private View stopView;
     private TextView dotView;
     private ObjectAnimator dotAnim;
+    private GlowBorderView glowView;
+    private ValueAnimator glowAnim;
 
     private boolean attached;
     private boolean hiddenForStealth;
@@ -101,10 +103,24 @@ public final class ControlBanner {
 
             pillView = buildPill(app);
             stopView = buildStop(app);
+            glowView = new GlowBorderView(app);
 
             int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                     : WindowManager.LayoutParams.TYPE_PHONE;
+
+            WindowManager.LayoutParams glowLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                            | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    PixelFormat.TRANSLUCENT);
+            glowLp.gravity = Gravity.TOP | Gravity.START;
+            wm.addView(glowView, glowLp);
 
             WindowManager.LayoutParams pillLp = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -152,9 +168,11 @@ public final class ControlBanner {
     private void detachViews() {
         try {
             cancelPulse();
+            cancelGlow();
             if (attached && wm != null) {
                 if (pillView != null) { try { wm.removeView(pillView); } catch (Throwable ignored) {} }
                 if (stopView != null) { try { wm.removeView(stopView); } catch (Throwable ignored) {} }
+                if (glowView != null) { try { wm.removeView(glowView); } catch (Throwable ignored) {} }
             }
         } finally {
             attached = false;
@@ -163,6 +181,7 @@ public final class ControlBanner {
             pillView = null;
             stopView = null;
             dotView = null;
+            glowView = null;
         }
     }
 
@@ -178,8 +197,10 @@ public final class ControlBanner {
         if (active) {
             dotView.setTextColor(Color.parseColor(COLOR_DOT_LIVE));
             startPulse();
+            startGlow();
         } else {
             cancelPulse();
+            cancelGlow();
             dotView.setAlpha(1f);
             dotView.setTextColor(Color.parseColor(COLOR_DOT_IDLE));
         }
@@ -299,6 +320,27 @@ public final class ControlBanner {
             dotAnim = null;
         }
         if (dotView != null) dotView.setAlpha(1f);
+    }
+
+    private void startGlow() {
+        cancelGlow();
+        if (glowView == null) return;
+        try {
+            glowAnim = ValueAnimator.ofFloat(0.25f, 1f);
+            glowAnim.setDuration(850);
+            glowAnim.setRepeatCount(ValueAnimator.INFINITE);
+            glowAnim.setRepeatMode(ValueAnimator.REVERSE);
+            glowAnim.addUpdateListener(a -> glowView.setIntensity((float) a.getAnimatedValue()));
+            glowAnim.start();
+        } catch (Throwable ignored) {}
+    }
+
+    private void cancelGlow() {
+        if (glowAnim != null) {
+            try { glowAnim.cancel(); } catch (Throwable ignored) {}
+            glowAnim = null;
+        }
+        if (glowView != null) glowView.setIntensity(0f);
     }
 
     private static int dp(Context ctx, int value) {
