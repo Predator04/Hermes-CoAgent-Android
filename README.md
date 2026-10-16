@@ -84,6 +84,9 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `wake` | — | Wake the screen |
 | `keep_awake` | `on?` | Hold the screen awake (no lock) while remote control runs. `on:true/false` to set; omit to read current state. Opt-in via Settings toggle |
 | `screen` | `on?`, `brightness?`, `brightness_mode?` | Display state (on, locked, secure) plus wake/sleep and brightness get/set |
+| `scroll_find` | `query`, `direction?`, `max_scrolls?`, `tap?` | Scroll (up to `max_scrolls`, default 10) until `query` text is found; optional `tap:true` taps it |
+| `toggle` | `query` | Toggle a UI switch/checkbox found by text |
+| `done` | — | Explicit "task complete" signal: stops the pulsing glow + hides the overlay so the owner knows the agent is finished |
 
 ### Seeing the screen
 
@@ -93,7 +96,7 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `find` | `query` | Search the UI tree for text/label |
 | `find_tap` | `query` | Find a UI element by text and tap it |
 | `telemetry` | `package?`, `clear?` | Self-learning: per-app find success rate / tree size (learns which apps are accessibility-opaque). `clear:true` wipes the store |
-| `screenshot` | `scale?`, `quality?`, `max_edge?` | Screen capture → base64 JPEG in the response |
+| `screenshot` | `scale?`, `quality?`, `max_edge?`, `x?`,`y?`,`width?`,`height?` | Screen capture → base64 JPEG. Pass all four of `x`/`y`/`width`/`height` to crop a region (notification, OTP) at full resolution |
 | `foreground` | — | Report the current foreground app (package, activity class, window title) — the agent's cheap "where am I" check |
 | `snapshot` | — | Screen snapshot |
 | `watch` | `duration?`, `interval?` | Stream scaled screenshots to the relay (`/frame`) for near-live viewing — `duration` 1–60s (default 20), `interval` 0.5–5s (default 1.5) |
@@ -114,8 +117,21 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | `bluetooth` | `on?` | Bluetooth state (enabled, name, discoverable, paired devices) and toggle on or off |
 | `charging` | — | Charging state |
 | `memory` | — | RAM usage: total/available/used MB, used %, low-memory flag, /proc/meminfo breakdown (buffers, cached, swap), and the service process heap |
+| `storage` | — | Storage usage (total / used / free) |
+| `data_usage` | — | Mobile data usage stats |
+| `volume` | `stream?`, `level?`, `mode?` | Get/set volume. `stream`: `call`/`voice`/`system`/`ring`/`music`/`media`/`alarm`/`notification`/`dtmf`; `level` 0–max; omit to read |
+| `screen_timeout` | `ms?` | Get/set the screen-off timeout (5000–1800000 ms; setting needs the write-settings grant) |
+| `status` | — | Remote-control service status |
 | `clipboard_get` | — | Read the clipboard *(Android 10+ restricts background reads)* |
 | `clipboard_set` | `text` | Write the clipboard |
+
+### SMS
+
+| Action | Params | What it does |
+|--------|--------|--------------|
+| `sms` | `count?` | Read the most recent inbox SMS (default 20, max 100; needs READ_SMS) |
+| `sms_send` | `to`, `text` | Send an SMS (needs SEND_SMS) |
+| `latest_code` | — | Pull the most recent OTP/verification code from SMS (4–8 digit match + code/verify/otp keyword) |
 
 ### Files & apps
 
@@ -164,7 +180,12 @@ Every command is `POST /cmd` (LAN) or relay `POST /command` with `{"action": "�
 | Action | Params | What it does |
 |--------|--------|--------------|
 | `notifications` | — | List active notifications |
+| `notify` | `title`, `message`, `id?` | Post a local notification on the phone (channel "Hermes Alerts") |
+| `notify_cancel` | `id?` | Cancel a notification posted by `notify` (omit `id` to cancel all) |
+| `notification_tap` | `key`, `package`, `action_index?` | Tap a notification or one of its action buttons |
+| `reply_notification` | `key`, `package`, `text`, `action_index?` | Inline-reply to a notification (messaging apps) |
 | `dismiss_notification` | `key` \| `package` | Dismiss a notification |
+| `dnd` | `set?` | Get/set Do-Not-Disturb (`all`/`priority`/`alarms`/`none`; needs notification-policy access) |
 | `privacy` | `on` | Privacy mode — blocks `screenshot`/`dump`/`snapshot`/`notifications` |
 | `log` | — | Command execution log |
 
@@ -206,7 +227,8 @@ app/src/main/
     RemoteRelayClient.java            # dials out to the relay (Remote Mode)
     HermesAccessibilityService.java   # tap/swipe/type/global-actions + UI-tree dump/find + screenshot
     CommandExecutor.java              # the command dispatcher (every action)
-    ControlBanner.java                # overlay "being controlled" pill + STOP button
+    ControlBanner.java                # overlay "being controlled" pill + STOP button + pulsing glow
+    GlowBorderView.java               # full-screen pulsing glow border (active-control indicator)
     PhotoCapture.java                 # silent front/back camera (AE-converged)
     AudioCapture.java                 # silent microphone recording
     LocationTracker.java              # GPS breadcrumbs (tracking)
