@@ -54,6 +54,7 @@ public final class ControlBanner {
     private GlowBorderView glowView;
     private ValueAnimator glowAnim;
     private ValueAnimator hueAnim;
+    private long glowHueMs = 6000L;
 
     private boolean attached;
     private boolean hiddenForStealth;
@@ -115,6 +116,9 @@ public final class ControlBanner {
             glowView = new GlowBorderView(app);
             glowView.setTheme(app.getSharedPreferences("hermes_prefs", Context.MODE_PRIVATE)
                     .getString("glow_color", "rainbow"));
+            String speed = app.getSharedPreferences("hermes_prefs", Context.MODE_PRIVATE)
+                    .getString("glow_speed", "slow");
+            glowHueMs = "fast".equals(speed) ? 1500L : "normal".equals(speed) ? 3000L : 6000L;
 
             int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -345,7 +349,7 @@ public final class ControlBanner {
             glowAnim.start();
             if (glowView.isRainbow()) {
                 hueAnim = ValueAnimator.ofFloat(0f, 360f);
-                hueAnim.setDuration(3000);
+                hueAnim.setDuration(glowHueMs);
                 hueAnim.setRepeatCount(ValueAnimator.INFINITE);
                 hueAnim.setRepeatMode(ValueAnimator.RESTART);
                 hueAnim.addUpdateListener(a -> glowView.setHue((float) a.getAnimatedValue()));

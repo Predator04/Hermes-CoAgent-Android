@@ -166,6 +166,51 @@ public class MainActivity extends Activity {
     };
     private final java.util.List<View> glowDots = new java.util.ArrayList<>();
 
+    private static final String[][] GLOW_SPEEDS = {
+            {"slow", "Slow"},
+            {"normal", "Normal"},
+            {"fast", "Fast"},
+    };
+    private final java.util.List<Button> glowSpeedButtons = new java.util.ArrayList<>();
+
+    private void addGlowSpeedPicker(LinearLayout parent) {
+        TextView label = new TextView(this);
+        label.setText("Glow speed");
+        label.setTextSize(13);
+        label.setTextColor(COLOR_TEXT);
+        label.setTypeface(null, Typeface.BOLD);
+        label.setPadding(0, dp(12), 0, dp(4));
+        parent.addView(label);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(2), 0, dp(6));
+        parent.addView(row);
+
+        String selected = getSharedPreferences(RemoteControlService.PREFS, MODE_PRIVATE)
+                .getString("glow_speed", "slow");
+        glowSpeedButtons.clear();
+        for (String[] s : GLOW_SPEEDS) {
+            Button b = new Button(this);
+            b.setText(s[1]);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, 0, dp(8), 0);
+            b.setLayoutParams(lp);
+            styleButton(b, selected.equals(s[0]) ? BtnStyle.PRIMARY : BtnStyle.GHOST);
+            b.setOnClickListener(v -> {
+                getSharedPreferences(RemoteControlService.PREFS, MODE_PRIVATE)
+                        .edit().putString("glow_speed", s[0]).apply();
+                for (Button b2 : glowSpeedButtons) {
+                    styleButton(b2, b2 == b ? BtnStyle.PRIMARY : BtnStyle.GHOST);
+                }
+            });
+            glowSpeedButtons.add(b);
+            row.addView(b);
+        }
+    }
+
     private void addGlowColorPicker(LinearLayout parent) {
         TextView label = new TextView(this);
         label.setText("Glow color");
@@ -445,6 +490,7 @@ public class MainActivity extends Activity {
                 RemoteControlService.setKeepAwake(this, checked));
 
         addGlowColorPicker(settingsContent);
+        addGlowSpeedPicker(settingsContent);
 
         TextView batteryLabel = new TextView(this);
         batteryLabel.setText("Battery optimization");
