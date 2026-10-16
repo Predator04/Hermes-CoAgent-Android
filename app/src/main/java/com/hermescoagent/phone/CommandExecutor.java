@@ -175,6 +175,14 @@ public final class CommandExecutor {
         boolean ok = false;
         String summary = null;
         boolean stealth = STEALTH_ACTIONS.contains(action);
+        if ("done".equals(action)) {
+            // Explicit task-complete signal from the agent: stop the glow + hide
+            // the bar so the owner knows the agent is finished.
+            try { ControlBanner.done(); } catch (Throwable ignored) {}
+            recordLog(action, true, null);
+            try { return new JSONObject().put("ok", true).put("done", true).toString(); }
+            catch (Exception ex) { return "{\"ok\":true}"; }
+        }
         try {
             if (stealth) {
                 // Stealth actions must not reveal the bar at all.

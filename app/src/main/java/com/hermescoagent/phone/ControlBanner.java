@@ -40,6 +40,8 @@ public final class ControlBanner {
     private static final String COLOR_STOP_EDGE = "#33FFFFFF";
 
     private static final long IDLE_HIDE_MS = 15000L;
+    /** Safety net: if the agent never sends "done", hide after this long. */
+    private static final long DONE_FALLBACK_MS = 300000L;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable hideTask = this::hideInternal;
@@ -68,17 +70,23 @@ public final class ControlBanner {
         INSTANCE.setActiveInternal(true);
     }
 
-    /** Dot back to gray, then hide after {@link #IDLE_HIDE_MS} of no further
-     *  commands. Called at the end of a non-stealth command so the bar stays
-     *  up through a burst of activity but disappears once the agent goes idle. */
+    /** Command ended but the task is NOT complete: keep the glow + dot pulsing
+     *  so the owner knows the agent is still working. Hide is deferred to the
+     *  explicit {@link #done()} signal or a long safety-net timeout. */
     public static void idle() {
         INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
-        INSTANCE.setActiveInternal(false);
-        INSTANCE.main.postDelayed(INSTANCE.hideTask, IDLE_HIDE_MS);
+        INSTANCE.main.postDelayed(INSTANCE.hideTask, DONE_FALLBACK_MS);
     }
 
     /** Immediately tear the bar down (stealth actions, service stop). */
     public static void hide() {
+        INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
+        INSTANCE.hideInternal();
+    }
+
+    /** Explicit "task complete" signal from the agent: stop pulsing + hide
+     *  immediately so the owner knows for sure the agent is finished. */
+    public static void done() {
         INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.hideInternal();
     }
