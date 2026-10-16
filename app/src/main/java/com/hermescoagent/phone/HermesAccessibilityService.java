@@ -179,6 +179,106 @@ public class HermesAccessibilityService extends AccessibilityService {
         return false;
     }
 
+    /** Capture the current screen as a software ARGB_8888 bitmap (API 30+),
+     *  or null on failure/timeout. Used by the OCR action. */
+    public Bitmap captureBitmap() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null;
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<Bitmap> ref = new AtomicReference<>();
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, screenshotCallbackExec(),
+                    new TakeScreenshotCallback() {
+                        @Override public void onSuccess(ScreenshotResult result) {
+                            HardwareBuffer hb = null; Bitmap wrapped = null;
+                            try {
+                                hb = result.getHardwareBuffer();
+                                wrapped = Bitmap.wrapHardwareBuffer(hb, result.getColorSpace());
+                                if (wrapped != null) ref.set(wrapped.copy(Bitmap.Config.ARGB_8888, false));
+                            } catch (Throwable ignored) {
+                            } finally {
+                                if (wrapped != null) wrapped.recycle();
+                                if (hb != null) hb.close();
+                                latch.countDown();
+                            }
+                        }
+                        @Override public void onFailure(int errorCode) { latch.countDown(); }
+                    });
+            latch.await(SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (Throwable ignored) {}
+        return ref.get();
+    }
+
+    /** Find the best-matching live node by text/label query (same heuristic as
+     *  toggle/findAndTap). Returns null when nothing matches. */
+    private AccessibilityNodeInfo findLiveNode(String query) {
+        JSONArray all = dumpNodes();
+        if (all == null) return null;
+        String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
+        JSONObject best = null;
+        JSONObject firstMatch = null;
+        long bestArea = Long.MAX_VALUE;
+        boolean bestClickable = false;
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject n = all.optJSONObject(i);
+            if (n == null || !matches(n, q)) continue;
+            if (firstMatch == null) firstMatch = n;
+            JSONArray b = n.optJSONArray("bounds");
+            if (b == null || b.length() < 4) continue;
+            long area = (long)(b.optInt(2) - b.optInt(0)) * (long)(b.optInt(3) - b.optInt(1));
+            if (area <= 0) continue;
+            boolean clickable = n.optBoolean("clickable", false);
+            boolean better;
+            if (best == null) better = true;
+            else if (clickable && !bestClickable) better = true;
+            else if (clickable == bestClickable && area < bestArea) better = true;
+            else better = false;
+            if (better) { best = n; bestArea = area; bestClickable = clickable; }
+        }
+        if (best == null) best = firstMatch;
+        if (best == null) return null;
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return null;
+        final AccessibilityNodeInfo[] found = new AccessibilityNodeInfo[1];
+        walkLiveNode(root, 0, best.optInt("id", -1), 0, found);
+        return found[0];
+    }
+
+    /** Type into a specific node found by query (uses ACTION_SET_TEXT directly,
+     *  no need to tap/focus first). */
+    public JSONObject setText(String query, String text) throws JSONException {
+        JSONObject resp = new JSONObject();
+        AccessibilityNodeInfo node = findLiveNode(query);
+        if (node == null) { resp.put("ok", false); resp.put("error", "no matching node"); return resp; }
+        Bundle args = new Bundle();
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text == null ? "" : text);
+        boolean ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+        resp.put("ok", ok);
+        resp.put("query", query);
+        return resp;
+    }
+
+    /** Expand a collapsible node (accordion, dropdown) found by query. */
+    public JSONObject expand(String query) throws JSONException {
+        JSONObject resp = new JSONObject();
+        AccessibilityNodeInfo node = findLiveNode(query);
+        if (node == null) { resp.put("ok", false); resp.put("error", "no matching node"); return resp; }
+        boolean ok = node.performAction(AccessibilityNodeInfo.ACTION_EXPAND);
+        resp.put("ok", ok);
+        resp.put("query", query);
+        return resp;
+    }
+
+    /** Collapse an expanded node (accordion, dropdown) found by query. */
+    public JSONObject collapse(String query) throws JSONException {
+        JSONObject resp = new JSONObject();
+        AccessibilityNodeInfo node = findLiveNode(query);
+        if (node == null) { resp.put("ok", false); resp.put("error", "no matching node"); return resp; }
+        boolean ok = node.performAction(AccessibilityNodeInfo.ACTION_COLLAPSE);
+        resp.put("ok", ok);
+        resp.put("query", query);
+        return resp;
+    }
+
     /** Scroll the first scrollable node in the tree. dir=true → forward/down.
      *  Thin wrapper around {@link #scrollWithState(boolean)}; retained for
      *  callers that only need a boolean. */

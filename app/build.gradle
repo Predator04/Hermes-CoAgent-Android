@@ -15,8 +15,8 @@ android {
         applicationId "com.hermescoagent.phone"
         minSdk 24
         targetSdk 34
-        versionCode 74
-        versionName "5.33"
+        versionCode 75
+        versionName "5.34"
     }
 
     buildTypes {
@@ -30,9 +30,21 @@ android {
 
     buildFeatures {
         buildConfig true
+        aidl true
     }
 }
 
 dependencies {
     implementation 'androidx.core:core:1.13.1'
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+}
+
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
 }

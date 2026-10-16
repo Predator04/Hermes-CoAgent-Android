@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
     private EditText relayUrlField;
     private Switch remoteToggle;
     private TextView batteryStatusView;
+    private TextView shizukuStatusView;
     private Button batteryExemptBtn;
 
     private static final String[][] GLOW_COLORS = {
@@ -208,6 +209,17 @@ public class MainActivity extends Activity {
             });
             glowSpeedButtons.add(b);
             row.addView(b);
+        }
+    }
+
+    private void refreshShizukuStatus() {
+        if (shizukuStatusView == null) return;
+        if (!ShizukuShell.available()) {
+            shizukuStatusView.setText("Not available — install + start the Shizuku app (shizuku.rikka.app)");
+        } else if (ShizukuShell.granted()) {
+            shizukuStatusView.setText("✓ Granted — shell access enabled");
+        } else {
+            shizukuStatusView.setText("Installed but permission not granted — tap Enable");
         }
     }
 
@@ -287,6 +299,11 @@ public class MainActivity extends Activity {
         // be stuck in the "ringing" state. Fix that as soon as the user opens
         // the app (in addition to the service-startup cleanup).
         CommandExecutor.restoreCrashedRingState(this);
+
+        try {
+            rikka.shizuku.Shizuku.addBinderReceivedListener(() -> runOnUiThread(this::refreshShizukuStatus));
+            rikka.shizuku.Shizuku.addRequestPermissionResultListener((code, result) -> runOnUiThread(this::refreshShizukuStatus));
+        } catch (Throwable ignored) {}
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundResource(R.drawable.bg_scroll_gradient);
@@ -491,6 +508,49 @@ public class MainActivity extends Activity {
 
         addGlowColorPicker(settingsContent);
         addGlowSpeedPicker(settingsContent);
+
+        // ─── Shizuku (privileged shell) ─────────────────────────────────
+        TextView shizukuLabel = new TextView(this);
+        shizukuLabel.setText("Shizuku (shell access)");
+        shizukuLabel.setTextSize(13);
+        shizukuLabel.setTextColor(COLOR_TEXT);
+        shizukuLabel.setTypeface(null, Typeface.BOLD);
+        shizukuLabel.setPadding(0, dp(12), 0, dp(2));
+        settingsContent.addView(shizukuLabel);
+
+        shizukuStatusView = new TextView(this);
+        shizukuStatusView.setTextSize(12);
+        shizukuStatusView.setTextColor(COLOR_MUTED);
+        settingsContent.addView(shizukuStatusView);
+
+        Button shizukuBtn = new Button(this);
+        shizukuBtn.setText("Enable Shizuku");
+        shizukuBtn.setOnClickListener(v -> {
+            if (!ShizukuShell.available()) {
+                Toast.makeText(this, "Install + start the Shizuku app first (shizuku.rikka.app)", Toast.LENGTH_LONG).show();
+            } else if (!ShizukuShell.granted()) {
+                ShizukuShell.requestPermission();
+            } else {
+                Toast.makeText(this, "Shizuku already granted", Toast.LENGTH_SHORT).show();
+            }
+        });
+        styleButton(shizukuBtn, BtnStyle.SECONDARY);
+        LinearLayout.LayoutParams shizukuBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        shizukuBtnLp.setMargins(0, dp(8), 0, dp(4));
+        shizukuBtn.setLayoutParams(shizukuBtnLp);
+        settingsContent.addView(shizukuBtn);
+
+        TextView shizukuNote = new TextView(this);
+        shizukuNote.setText("Lets the agent run privileged shell commands (settings, pm, dumpsys) "
+                + "without root. Requires the free Shizuku app + a one-time wireless-debugging grant.");
+        shizukuNote.setTextSize(11);
+        shizukuNote.setTextColor(COLOR_MUTED);
+        shizukuNote.setPadding(0, 0, 0, dp(8));
+        settingsContent.addView(shizukuNote);
+
+        refreshShizukuStatus();
 
         TextView batteryLabel = new TextView(this);
         batteryLabel.setText("Battery optimization");

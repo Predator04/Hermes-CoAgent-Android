@@ -462,6 +462,24 @@ public final class CommandExecutor {
                 else return s.toggle(req.optString("query"));
                 break;
             }
+            case "set_text": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else return s.setText(req.optString("query"), req.optString("text"));
+                break;
+            }
+            case "expand": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else return s.expand(req.optString("query"));
+                break;
+            }
+            case "collapse": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else return s.collapse(req.optString("query"));
+                break;
+            }
             case "telemetry": {
                 String pkg = req.optString("package", "");
                 if (req.optBoolean("clear", false)) {
@@ -729,6 +747,25 @@ public final class CommandExecutor {
             case "status":
                 fillStatus(ctx, resp);
                 break;
+            case "shizuku": {
+                resp.put("available", ShizukuShell.available());
+                resp.put("granted", ShizukuShell.granted());
+                break;
+            }
+            case "shell": {
+                String out = ShizukuShell.exec(req.optString("command", ""));
+                resp.put("ok", !out.startsWith("error:"));
+                resp.put("output", out);
+                break;
+            }
+            case "ocr": {
+                if (Redaction.isPrivacyOn(ctx)) return privacyRefusal();
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); break; }
+                android.graphics.Bitmap bmp = s.captureBitmap();
+                if (bmp == null) { resp.put("ok", false); resp.put("error", "screenshot failed"); break; }
+                return OcrHelper.recognize(bmp);
+            }
 
             default:
                 resp.put("ok", false);
