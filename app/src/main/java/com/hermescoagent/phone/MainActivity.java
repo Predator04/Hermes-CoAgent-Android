@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
@@ -152,6 +153,70 @@ public class MainActivity extends Activity {
     private Switch remoteToggle;
     private TextView batteryStatusView;
     private Button batteryExemptBtn;
+
+    private static final String[][] GLOW_COLORS = {
+            {"rainbow", "Rainbow"},
+            {"#F85149", "Red"},
+            {"#58A6FF", "Blue"},
+            {"#3FB950", "Green"},
+            {"#00C8FF", "Cyan"},
+            {"#A371F7", "Purple"},
+            {"#FFA657", "Amber"},
+            {"#FFFFFF", "White"},
+    };
+    private final java.util.List<View> glowDots = new java.util.ArrayList<>();
+
+    private void addGlowColorPicker(LinearLayout parent) {
+        TextView label = new TextView(this);
+        label.setText("Glow color");
+        label.setTextSize(13);
+        label.setTextColor(COLOR_TEXT);
+        label.setTypeface(null, Typeface.BOLD);
+        label.setPadding(0, dp(12), 0, dp(4));
+        parent.addView(label);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(2), 0, dp(6));
+        parent.addView(row);
+
+        String selected = getSharedPreferences(RemoteControlService.PREFS, MODE_PRIVATE)
+                .getString("glow_color", "rainbow");
+        glowDots.clear();
+        for (String[] c : GLOW_COLORS) {
+            row.addView(buildGlowDot(c[0], c[1], selected.equals(c[0])));
+        }
+    }
+
+    private View buildGlowDot(String key, String label, boolean selected) {
+        TextView dot = new TextView(this);
+        int size = dp(38);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+        lp.setMargins(0, 0, dp(10), 0);
+        dot.setLayoutParams(lp);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        if ("rainbow".equals(key)) {
+            bg.setColors(new int[]{0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF00FFFF, 0xFF0000FF, 0xFFFF00FF});
+            bg.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
+        } else {
+            try { bg.setColor(Color.parseColor(key)); } catch (Exception e) { bg.setColor(Color.GRAY); }
+        }
+        bg.setStroke(selected ? dp(3) : dp(1), selected ? Color.WHITE : Color.parseColor("#33FFFFFF"));
+        dot.setBackground(bg);
+        dot.setContentDescription(label);
+        dot.setOnClickListener(v -> {
+            getSharedPreferences(RemoteControlService.PREFS, MODE_PRIVATE)
+                    .edit().putString("glow_color", key).apply();
+            for (View d : glowDots) {
+                boolean sel = d == dot;
+                GradientDrawable g = (GradientDrawable) d.getBackground();
+                g.setStroke(sel ? dp(3) : dp(1), sel ? Color.WHITE : Color.parseColor("#33FFFFFF"));
+            }
+        });
+        glowDots.add(dot);
+        return dot;
+    }
     private LinearLayout batteryTopCard;
     private Button grantAccessibility;
     private Button startServer;
@@ -378,6 +443,8 @@ public class MainActivity extends Activity {
 
         keepAwakeToggle.setOnCheckedChangeListener((btn, checked) ->
                 RemoteControlService.setKeepAwake(this, checked));
+
+        addGlowColorPicker(settingsContent);
 
         TextView batteryLabel = new TextView(this);
         batteryLabel.setText("Battery optimization");

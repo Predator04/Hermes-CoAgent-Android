@@ -53,6 +53,7 @@ public final class ControlBanner {
     private ObjectAnimator dotAnim;
     private GlowBorderView glowView;
     private ValueAnimator glowAnim;
+    private ValueAnimator hueAnim;
 
     private boolean attached;
     private boolean hiddenForStealth;
@@ -112,6 +113,8 @@ public final class ControlBanner {
             pillView = buildPill(app);
             stopView = buildStop(app);
             glowView = new GlowBorderView(app);
+            glowView.setTheme(app.getSharedPreferences("hermes_prefs", Context.MODE_PRIVATE)
+                    .getString("glow_color", "rainbow"));
 
             int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                     ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -340,6 +343,14 @@ public final class ControlBanner {
             glowAnim.setRepeatMode(ValueAnimator.REVERSE);
             glowAnim.addUpdateListener(a -> glowView.setIntensity((float) a.getAnimatedValue()));
             glowAnim.start();
+            if (glowView.isRainbow()) {
+                hueAnim = ValueAnimator.ofFloat(0f, 360f);
+                hueAnim.setDuration(3000);
+                hueAnim.setRepeatCount(ValueAnimator.INFINITE);
+                hueAnim.setRepeatMode(ValueAnimator.RESTART);
+                hueAnim.addUpdateListener(a -> glowView.setHue((float) a.getAnimatedValue()));
+                hueAnim.start();
+            }
         } catch (Throwable ignored) {}
     }
 
@@ -347,6 +358,10 @@ public final class ControlBanner {
         if (glowAnim != null) {
             try { glowAnim.cancel(); } catch (Throwable ignored) {}
             glowAnim = null;
+        }
+        if (hueAnim != null) {
+            try { hueAnim.cancel(); } catch (Throwable ignored) {}
+            hueAnim = null;
         }
         if (glowView != null) glowView.setIntensity(0f);
     }

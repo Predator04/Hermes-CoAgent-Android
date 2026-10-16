@@ -15,8 +15,8 @@ android {
         applicationId "com.hermescoagent.phone"
         minSdk 24
         targetSdk 34
-        versionCode 72
-        versionName "5.31"
+        versionCode 73
+        versionName "5.32"
     }
 
     buildTypes {
