@@ -42,6 +42,7 @@ public final class ShizukuShell {
         Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
                 new ComponentName("com.hermescoagent.phone", ShellService.class.getName()))
                 .daemon(false)
+                .processNameSuffix("shell")
                 .version(1);
 
         try {

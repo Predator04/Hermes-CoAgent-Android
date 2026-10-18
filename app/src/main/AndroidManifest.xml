@@ -73,6 +73,11 @@
                 android:value="Remote device control" />
         </service>
 
+        <service
+            android:name=".ShellService"
+            android:exported="false"
+            android:process=":shell" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
