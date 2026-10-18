@@ -34,6 +34,7 @@ public final class ControlBanner {
     private static final String COLOR_BG        = "#E60D1117";
     private static final String COLOR_STROKE    = "#3358A6FF";
     private static final String COLOR_LABEL     = "#E6EDF3";
+    private static final String COLOR_LABEL_MUTED = "#99C7D4";
     private static final String COLOR_DOT_IDLE  = "#6E7681";
     private static final String COLOR_DOT_LIVE  = "#F85149";
     private static final String COLOR_STOP_BG   = "#F85149";
@@ -268,7 +269,18 @@ public final class ControlBanner {
         label.setText("Hermes CoAgent");
         label.setTextColor(Color.parseColor(COLOR_LABEL));
         label.setTextSize(13);
-        pill.addView(label);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+
+        TextView sub = new TextView(ctx);
+        sub.setText("is currently using this phone");
+        sub.setTextColor(Color.parseColor(COLOR_LABEL_MUTED));
+        sub.setTextSize(11);
+
+        LinearLayout textCol = new LinearLayout(ctx);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        textCol.addView(label);
+        textCol.addView(sub);
+        pill.addView(textCol);
 
         return pill;
     }

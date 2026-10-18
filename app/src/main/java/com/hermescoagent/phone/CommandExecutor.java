@@ -3333,6 +3333,11 @@ public final class CommandExecutor {
         resp.put("deleted", true);
     }
 
+    /** Wrap a path in single quotes for sh -c, escaping any embedded quotes. */
+    private static String shellQuote(String s) {
+        return "'" + s.replace("'", "'\\''") + "'";
+    }
+
     private static void installApk(Context ctx, JSONObject req, JSONObject resp) throws Exception {
         String url = req.optString("url", "");
         if (url.isEmpty()) { resp.put("ok", false); resp.put("error", "url required"); return; }
@@ -3393,6 +3398,29 @@ public final class CommandExecutor {
 
         resp.put("downloaded_bytes", downloaded);
         resp.put("sha256", sha256Hex);
+
+        // Silent install via Shizuku first (no dialog, no background-activity restriction).
+        // This is what makes "install on its own" actually work when Shizuku is running.
+        if (ShizukuShell.available() && ShizukuShell.granted()) {
+            String p = apk.getAbsolutePath();
+            String out = ShizukuShell.exec("pm install -r -d " + shellQuote(p));
+            resp.put("install_method", "shizuku");
+            resp.put("install_output", out);
+            boolean ok = out != null && (out.contains("Success") || out.contains("success"));
+            resp.put("install_started", ok);
+            resp.put("ok", ok);
+            if (!ok) resp.put("error", "shizuku install failed: " + out);
+            return;
+        }
+
+        // No Shizuku: fall back to PackageInstaller (needs the install dialog / "install
+        // unknown apps" permission). Report the permission state so the agent can guide the user.
+        if (!ctx.getPackageManager().canRequestPackageInstalls()) {
+            resp.put("ok", false);
+            resp.put("error", "no Shizuku and 'install unknown apps' not granted for this app");
+            resp.put("install_started", false);
+            return;
+        }
 
         boolean started = false;
         String startError = null;

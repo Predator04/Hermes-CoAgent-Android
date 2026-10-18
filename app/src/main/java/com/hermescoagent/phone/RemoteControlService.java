@@ -151,7 +151,7 @@ public class RemoteControlService extends Service {
         if (Build.VERSION.SDK_INT >= 26) {
             n = new Notification.Builder(this, channelId)
                     .setContentTitle("Hermes CoAgent")
-                    .setContentText("Remote control active on port " + PORT)
+                    .setContentText("is currently using this phone")
                     .setSmallIcon(android.R.drawable.ic_menu_compass)
                     .setContentIntent(pi)
                     .setOngoing(true)
@@ -159,7 +159,7 @@ public class RemoteControlService extends Service {
         } else {
             n = new Notification.Builder(this)
                     .setContentTitle("Hermes CoAgent")
-                    .setContentText("Remote control active on port " + PORT)
+                    .setContentText("is currently using this phone")
                     .setSmallIcon(android.R.drawable.ic_menu_compass)
                     .setContentIntent(pi)
                     .setOngoing(true)
