@@ -108,6 +108,7 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     public boolean tap(int x, int y) {
+        PointerOverlay.show(this, x, y);
         Path p = new Path();
         p.moveTo(x, y);
         GestureDescription g = new GestureDescription.Builder()
@@ -116,6 +117,7 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     public boolean longPress(int x, int y, long durationMs) {
+        PointerOverlay.show(this, x, y);
         long duration = Math.max(MIN_SWIPE_MS, Math.min(MAX_SWIPE_MS, durationMs));
         Path p = new Path();
         p.moveTo(x, y);
@@ -125,6 +127,8 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     public boolean swipe(int x1, int y1, int x2, int y2, long durationMs) {
+        PointerOverlay.show(this, x1, y1);
+        PointerOverlay.show(this, x2, y2);
         long duration = Math.max(MIN_SWIPE_MS, Math.min(MAX_SWIPE_MS, durationMs));
         Path p = new Path();
         p.moveTo(x1, y1);
