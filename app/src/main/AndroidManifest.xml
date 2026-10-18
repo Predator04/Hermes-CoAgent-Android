@@ -75,8 +75,7 @@
 
         <service
             android:name=".ShellService"
-            android:exported="false"
-            android:process=":shell" />
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
