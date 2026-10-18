@@ -766,12 +766,149 @@ public final class CommandExecutor {
                 if (bmp == null) { resp.put("ok", false); resp.put("error", "screenshot failed"); break; }
                 return OcrHelper.recognize(bmp);
             }
+            case "help":
+            case "actions":
+                fillHelp(resp);
+                break;
 
             default:
                 resp.put("ok", false);
                 resp.put("error", "unknown action: " + action);
         }
         return resp;
+    }
+
+    // ────────────────────────── help / actions ──────────────────────────
+
+    /** Build one self-describing catalog entry. Never throws. */
+    private static JSONObject helpEntry(String action, String params, String group, String desc) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("action", action);
+            o.put("params", params);
+            o.put("group", group);
+            o.put("desc", desc);
+        } catch (Exception ignored) {}
+        return o;
+    }
+
+    /**
+     * Return the complete action catalog so an agent driving the phone over
+     * HTTP can discover what is available without consulting external docs.
+     * This is the authoritative list of top-level dispatch actions.
+     */
+    private static void fillHelp(JSONObject resp) {
+        JSONArray arr = new JSONArray();
+
+        // input (accessibility)
+        arr.put(helpEntry("tap", "x,y", "input", "Tap screen coordinates"));
+        arr.put(helpEntry("long_press", "x,y,duration", "input", "Long press screen coordinates"));
+        arr.put(helpEntry("swipe", "x1,y1,x2,y2,duration", "input", "Swipe from one point to another"));
+        arr.put(helpEntry("type", "text", "input", "Type text without the soft keyboard"));
+        arr.put(helpEntry("key", "code", "input", "Global key (back, home, recents, notifications, quick_settings)"));
+        arr.put(helpEntry("dump", "", "input", "Dump accessibility tree with text, desc and bounds per node"));
+        arr.put(helpEntry("find", "query", "input", "Find nodes whose text or desc contains query"));
+        arr.put(helpEntry("find_tap", "query", "input", "Find best matching node and tap its center"));
+        arr.put(helpEntry("toggle", "query", "input", "Toggle checked state of a node"));
+        arr.put(helpEntry("set_text", "query,text", "input", "Set text into a field found by query"));
+        arr.put(helpEntry("expand", "query", "input", "Expand a node"));
+        arr.put(helpEntry("collapse", "query", "input", "Collapse a node"));
+        arr.put(helpEntry("scroll", "direction", "input", "Scroll first scrollable (down, up, forward, backward)"));
+        arr.put(helpEntry("scroll_find", "query,direction,max_scrolls,tap", "input", "Scroll until query matches, optionally tap"));
+        arr.put(helpEntry("wait", "for,until,timeout_ms", "input", "Wait for element appear, disappear, or UI change"));
+
+        // screen
+        arr.put(helpEntry("screenshot", "quality,include_base64,region", "screen", "Capture screen, base64 only when include_base64 true"));
+        arr.put(helpEntry("snapshot", "", "screen", "Capture screen to file with path, bytes and dimensions"));
+        arr.put(helpEntry("screen", "", "screen", "Capture screen"));
+        arr.put(helpEntry("ocr", "", "screen", "Recognize text on screen with on device OCR"));
+        arr.put(helpEntry("wake", "", "screen", "Wake screen and report on and keyguard state"));
+        arr.put(helpEntry("lock", "", "screen", "Lock the screen"));
+        arr.put(helpEntry("keep_awake", "on", "screen", "Hold screen awake while controlling"));
+        arr.put(helpEntry("screen_timeout", "ms", "screen", "Set screen off timeout, needs write settings grant"));
+        arr.put(helpEntry("rotation", "", "screen", "Get or set screen rotation"));
+        arr.put(helpEntry("screen_size", "", "screen", "Screen dimensions and density"));
+
+        // device info
+        arr.put(helpEntry("info", "", "device", "Model, Android version and device id"));
+        arr.put(helpEntry("battery", "", "device", "Battery level, charging state, health and temperature"));
+        arr.put(helpEntry("storage", "", "device", "Storage free and total"));
+        arr.put(helpEntry("memory", "", "device", "Memory usage"));
+        arr.put(helpEntry("data_usage", "", "device", "Mobile and wifi data usage"));
+        arr.put(helpEntry("network", "", "device", "Network connectivity status"));
+        arr.put(helpEntry("wifi", "", "device", "WiFi status and SSID"));
+        arr.put(helpEntry("bluetooth", "", "device", "Bluetooth status and toggle"));
+        arr.put(helpEntry("dnd", "", "device", "Do not disturb mode"));
+        arr.put(helpEntry("charging", "", "device", "Charging state"));
+        arr.put(helpEntry("time", "", "device", "Current time and timezone"));
+        arr.put(helpEntry("status", "", "device", "Overall device status summary"));
+        arr.put(helpEntry("log", "", "device", "Recent command log"));
+        arr.put(helpEntry("telemetry", "package,clear", "device", "Find or clear device telemetry"));
+        arr.put(helpEntry("shizuku", "", "device", "Shizuku availability and grant status"));
+        arr.put(helpEntry("shell", "command", "device", "Run a shell command via Shizuku"));
+
+        // apps
+        arr.put(helpEntry("launch", "package", "apps", "Launch an app by package"));
+        arr.put(helpEntry("list_apps", "", "apps", "List launchable apps"));
+        arr.put(helpEntry("app_info", "package", "apps", "App details for a package"));
+        arr.put(helpEntry("packages", "", "apps", "Installed packages"));
+        arr.put(helpEntry("install_apk", "path", "apps", "Install an APK"));
+        arr.put(helpEntry("uninstall", "package", "apps", "Uninstall a package"));
+        arr.put(helpEntry("foreground", "", "apps", "Current foreground app package, activity and title"));
+        arr.put(helpEntry("kill_background", "", "apps", "Kill background apps"));
+
+        // files
+        arr.put(helpEntry("file_list", "path", "files", "List directory contents"));
+        arr.put(helpEntry("file_get", "path", "files", "Read file contents"));
+        arr.put(helpEntry("file_put", "path,content", "files", "Write file contents"));
+        arr.put(helpEntry("file_info", "path", "files", "File metadata"));
+        arr.put(helpEntry("file_delete", "path", "files", "Delete a file"));
+
+        // comms
+        arr.put(helpEntry("sms", "", "comms", "Read SMS inbox"));
+        arr.put(helpEntry("sms_send", "to,text", "comms", "Send an SMS"));
+        arr.put(helpEntry("latest_code", "", "comms", "Most recent verification code from SMS"));
+        arr.put(helpEntry("call_log", "", "comms", "Read call log"));
+        arr.put(helpEntry("contacts", "", "comms", "Read contacts"));
+        arr.put(helpEntry("clipboard_get", "", "comms", "Read clipboard, restricted on Android 10 plus"));
+        arr.put(helpEntry("clipboard_set", "text", "comms", "Set clipboard"));
+        arr.put(helpEntry("open_url", "url", "comms", "Open a URL in the browser"));
+
+        // notifications
+        arr.put(helpEntry("notifications", "", "notifications", "List active notifications"));
+        arr.put(helpEntry("notification_tap", "key,package,action_index", "notifications", "Tap a notification"));
+        arr.put(helpEntry("reply_notification", "key,package,text,action_index", "notifications", "Reply to a notification"));
+        arr.put(helpEntry("dismiss_notification", "key,package", "notifications", "Dismiss notifications"));
+        arr.put(helpEntry("notify", "", "notifications", "Push a local notification"));
+        arr.put(helpEntry("notify_cancel", "", "notifications", "Cancel a local notification"));
+
+        // find phone
+        arr.put(helpEntry("ring", "", "findphone", "Ring loudly to find the phone"));
+        arr.put(helpEntry("stop_ring", "", "findphone", "Stop ringing"));
+        arr.put(helpEntry("find_phone", "", "findphone", "Ring, flashlight and speak"));
+        arr.put(helpEntry("flashlight", "on", "findphone", "Toggle flashlight"));
+        arr.put(helpEntry("speak", "text", "findphone", "Text to speech"));
+        arr.put(helpEntry("vibrate", "", "findphone", "Vibrate"));
+        arr.put(helpEntry("location", "", "findphone", "Current location"));
+        arr.put(helpEntry("location_history", "", "findphone", "Location history"));
+        arr.put(helpEntry("tracking", "on", "findphone", "Enable location tracking"));
+
+        // camera, theft, misc
+        arr.put(helpEntry("photo", "camera", "security", "Take a photo, camera is front or back"));
+        arr.put(helpEntry("mic", "seconds", "security", "Record audio for a number of seconds"));
+        arr.put(helpEntry("stolen", "", "security", "Theft response, lock and alert"));
+        arr.put(helpEntry("sim", "", "security", "SIM info"));
+        arr.put(helpEntry("sim_events", "", "security", "SIM change events"));
+        arr.put(helpEntry("privacy", "on", "security", "Toggle privacy redaction"));
+        arr.put(helpEntry("volume", "", "security", "Get or set volume"));
+        arr.put(helpEntry("ping", "", "security", "Health check"));
+        arr.put(helpEntry("shutdown", "", "security", "Stop the remote control service"));
+        arr.put(helpEntry("watch", "", "security", "Watch for events"));
+
+        try {
+            resp.put("count", arr.length());
+            resp.put("actions", arr);
+        } catch (Exception ignored) {}
     }
 
     // ────────────────────────── ring / stop_ring ─────────────────────────
