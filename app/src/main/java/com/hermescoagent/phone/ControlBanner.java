@@ -83,6 +83,7 @@ public final class ControlBanner {
 
     /** Immediately tear the bar down (stealth actions, service stop). */
     public static void hide() {
+        PointerOverlay.hide();
         INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.hideInternal();
     }
@@ -90,6 +91,7 @@ public final class ControlBanner {
     /** Explicit "task complete" signal from the agent: stop pulsing + hide
      *  immediately so the owner knows for sure the agent is finished. */
     public static void done() {
+        PointerOverlay.hide();
         INSTANCE.main.removeCallbacks(INSTANCE.hideTask);
         INSTANCE.hideInternal();
     }
