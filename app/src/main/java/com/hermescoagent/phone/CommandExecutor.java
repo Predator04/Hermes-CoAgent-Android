@@ -256,6 +256,46 @@ public final class CommandExecutor {
                         req.getInt("x2"), req.getInt("y2"), req.optLong("duration", 300)));
                 break;
             }
+            case "tap_rel": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    DisplayMetrics dm = readDisplayMetrics(ctx);
+                    int x = resolveCoord(req.opt("x"), dm.widthPixels);
+                    int y = resolveCoord(req.opt("y"), dm.heightPixels);
+                    if (x < 0 || y < 0) {
+                        resp.put("ok", false);
+                        resp.put("error", "x and y required (fraction 0..1 or \"center\")");
+                    } else {
+                        resp.put("ok", s.tap(x, y));
+                        resp.put("x", x);
+                        resp.put("y", y);
+                    }
+                }
+                break;
+            }
+            case "swipe_rel": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    DisplayMetrics dm = readDisplayMetrics(ctx);
+                    int x1 = resolveCoord(req.opt("x1"), dm.widthPixels);
+                    int y1 = resolveCoord(req.opt("y1"), dm.heightPixels);
+                    int x2 = resolveCoord(req.opt("x2"), dm.widthPixels);
+                    int y2 = resolveCoord(req.opt("y2"), dm.heightPixels);
+                    if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) {
+                        resp.put("ok", false);
+                        resp.put("error", "x1,y1,x2,y2 required (fraction 0..1 or \"center\")");
+                    } else {
+                        resp.put("ok", s.swipe(x1, y1, x2, y2, req.optLong("duration", 300)));
+                        resp.put("x1", x1);
+                        resp.put("y1", y1);
+                        resp.put("x2", x2);
+                        resp.put("y2", y2);
+                    }
+                }
+                break;
+            }
             case "type": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
@@ -804,6 +844,8 @@ public final class CommandExecutor {
         arr.put(helpEntry("tap", "x,y", "input", "Tap screen coordinates"));
         arr.put(helpEntry("long_press", "x,y,duration", "input", "Long press screen coordinates"));
         arr.put(helpEntry("swipe", "x1,y1,x2,y2,duration", "input", "Swipe from one point to another"));
+        arr.put(helpEntry("tap_rel", "x,y", "input", "Tap by fractional coordinates 0..1 or center"));
+        arr.put(helpEntry("swipe_rel", "x1,y1,x2,y2,duration", "input", "Swipe by fractional coordinates 0..1 or center"));
         arr.put(helpEntry("type", "text", "input", "Type text without the soft keyboard"));
         arr.put(helpEntry("key", "code", "input", "Global key (back, home, recents, notifications, quick_settings)"));
         arr.put(helpEntry("dump", "", "input", "Dump accessibility tree with text, desc and bounds per node"));
@@ -3139,6 +3181,34 @@ public final class CommandExecutor {
     }
 
     // ─────────────────────────── shared helpers ──────────────────────────
+
+    /** Resolve a tap/swipe coordinate to absolute pixels.
+     *
+     *  Accepts a fractional value in [0,1] ("tap at 50 percent width"), a
+     *  bare number greater than 1 (treated as absolute pixels), or the
+     *  string "center" / "middle" (the midpoint). The result is clamped to
+     *  the display span. Returns -1 when the value is absent or unparseable
+     *  so callers can report a validation error.
+     */
+    private static int resolveCoord(Object v, int span) {
+        if (span <= 0) return -1;
+        if (v instanceof String) {
+            String str = ((String) v).trim().toLowerCase(Locale.US);
+            if (str.equals("center") || str.equals("middle") || str.equals("c")) {
+                return span / 2;
+            }
+            try {
+                v = Double.parseDouble(str);
+            } catch (NumberFormatException nfe) {
+                return -1;
+            }
+        }
+        if (!(v instanceof Number)) return -1;
+        double d = ((Number) v).doubleValue();
+        if (Double.isNaN(d) || Double.isInfinite(d)) return -1;
+        int px = (d >= 0.0 && d <= 1.0) ? (int) Math.round(d * (span - 1)) : (int) Math.round(d);
+        return Math.max(0, Math.min(span - 1, px));
+    }
 
     private static DisplayMetrics readDisplayMetrics(Context ctx) {
         final DisplayMetrics dm = new DisplayMetrics();
