@@ -493,7 +493,22 @@ public final class CommandExecutor {
             case "find_tap": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
-                else return s.findAndTap(req.optString("query"));
+                else {
+                    int findIndex = req.optInt("index", -1);
+                    return s.findAndTap(req.optString("query"), findIndex);
+                }
+                break;
+            }
+            case "find_long_press": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    int idx = req.optInt("index", -1);
+                    long dur = req.optLong("duration", 800);
+                    if (dur < 100) dur = 100;
+                    if (dur > 5000) dur = 5000;
+                    return s.findAndLongPress(req.optString("query"), idx, dur);
+                }
                 break;
             }
             case "toggle": {
@@ -850,7 +865,8 @@ public final class CommandExecutor {
         arr.put(helpEntry("key", "code", "input", "Global key (back, home, recents, notifications, quick_settings)"));
         arr.put(helpEntry("dump", "", "input", "Dump accessibility tree with text, desc and bounds per node"));
         arr.put(helpEntry("find", "query", "input", "Find nodes whose text or desc contains query"));
-        arr.put(helpEntry("find_tap", "query", "input", "Find best matching node and tap its center"));
+        arr.put(helpEntry("find_tap", "query,index", "input", "Find matching node and tap its center (index selects the Nth match)"));
+        arr.put(helpEntry("find_long_press", "query,index,duration", "input", "Long press a node found by query (index selects the Nth match)"));
         arr.put(helpEntry("toggle", "query", "input", "Toggle checked state of a node"));
         arr.put(helpEntry("set_text", "query,text", "input", "Set text into a field found by query"));
         arr.put(helpEntry("expand", "query", "input", "Expand a node"));

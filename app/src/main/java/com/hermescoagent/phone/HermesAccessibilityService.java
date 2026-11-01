@@ -483,28 +483,33 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * Find the best matching node for the query and dispatch a tap on its
-     * center. Returns a JSON response ready to send back to the client.
+     * Shared selector: returns the Nth matching node (0-based) when index >= 0,
+     * or the "best" match (smallest clickable area, prefer clickable, else
+     * first) when index is negative. Returns null when nothing matches.
      */
-    public JSONObject findAndTap(String query) throws JSONException {
-        long t0 = System.currentTimeMillis();
-        JSONObject resp = new JSONObject();
+    private JSONObject findMatchByIndex(String query, int index) throws JSONException {
         JSONArray all = dumpNodes();
-        if (all == null) {
-            resp.put("ok", false);
-            resp.put("error", "dump timeout");
-            logFindSafe(query, false, 0, "", t0);
-            return resp;
-        }
+        if (all == null) return null;
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
+        if (index >= 0) {
+            int seen = 0;
+            for (int i = 0; i < all.length(); i++) {
+                JSONObject n = all.optJSONObject(i);
+                if (n != null && matches(n, q)) {
+                    if (seen == index) return n;
+                    seen++;
+                }
+            }
+            return null;
+        }
         JSONObject best = null;
-        JSONObject firstMatch = null;
+        JSONObject first = null;
         long bestArea = Long.MAX_VALUE;
         boolean bestClickable = false;
         for (int i = 0; i < all.length(); i++) {
             JSONObject n = all.optJSONObject(i);
             if (n == null || !matches(n, q)) continue;
-            if (firstMatch == null) firstMatch = n;
+            if (first == null) first = n;
             JSONArray b = n.optJSONArray("bounds");
             if (b == null || b.length() < 4) continue;
             long area = (long) (b.optInt(2) - b.optInt(0)) * (long) (b.optInt(3) - b.optInt(1));
@@ -515,20 +520,35 @@ public class HermesAccessibilityService extends AccessibilityService {
             else if (clickable && !bestClickable) better = true;
             else if (clickable == bestClickable && area < bestArea) better = true;
             else better = false;
-            if (better) {
-                best = n;
-                bestArea = area;
-                bestClickable = clickable;
-            }
+            if (better) { best = n; bestArea = area; bestClickable = clickable; }
         }
-        if (best == null) best = firstMatch;
+        return best != null ? best : first;
+    }
+
+    /**
+     * Find the best matching node for the query and dispatch a tap on its
+     * center. Returns a JSON response ready to send back to the client.
+     */
+    public JSONObject findAndTap(String query) throws JSONException {
+        return findAndTap(query, -1);
+    }
+
+    public JSONObject findAndTap(String query, int index) throws JSONException {
+        long t0 = System.currentTimeMillis();
+        JSONObject resp = new JSONObject();
+        JSONObject best = findMatchByIndex(query, index);
         if (best == null) {
             resp.put("ok", false);
-            resp.put("error", "no match");
-            logFindSafe(query, false, all.length(), "", t0);
+            resp.put("error", index >= 0 ? "no match at index" : "no match");
+            logFindSafe(query, false, 0, "", t0);
             return resp;
         }
-        JSONArray b = best.getJSONArray("bounds");
+        JSONArray b = best.optJSONArray("bounds");
+        if (b == null || b.length() < 4) {
+            resp.put("ok", false);
+            resp.put("error", "no bounds");
+            return resp;
+        }
         int cx = (b.getInt(0) + b.getInt(2)) / 2;
         int cy = (b.getInt(1) + b.getInt(3)) / 2;
         boolean tapped = tap(cx, cy);
@@ -538,9 +558,46 @@ public class HermesAccessibilityService extends AccessibilityService {
         info.put("bounds", b);
         info.put("cx", cx);
         info.put("cy", cy);
+        if (index >= 0) info.put("index", index);
         resp.put("ok", tapped);
         resp.put("tapped", info);
-        logFindSafe(query, tapped, all.length(), matchField(best, q), t0);
+        logFindSafe(query, tapped, 0, matchField(best, query == null ? "" : query.toLowerCase(Locale.ROOT)), t0);
+        return resp;
+    }
+
+    /**
+     * Find a node by query (best or Nth match) and long press its center.
+     * durationMs is clamped by {@link #longPress(int, int, long)}.
+     */
+    public JSONObject findAndLongPress(String query, int index, long durationMs) throws JSONException {
+        long t0 = System.currentTimeMillis();
+        JSONObject resp = new JSONObject();
+        JSONObject node = findMatchByIndex(query, index);
+        if (node == null) {
+            resp.put("ok", false);
+            resp.put("error", index >= 0 ? "no match at index" : "no match");
+            logFindSafe(query, false, 0, "", t0);
+            return resp;
+        }
+        JSONArray b = node.optJSONArray("bounds");
+        if (b == null || b.length() < 4) {
+            resp.put("ok", false);
+            resp.put("error", "no bounds");
+            return resp;
+        }
+        int cx = (b.getInt(0) + b.getInt(2)) / 2;
+        int cy = (b.getInt(1) + b.getInt(3)) / 2;
+        boolean ok = longPress(cx, cy, durationMs);
+        resp.put("ok", ok);
+        JSONObject info = new JSONObject();
+        info.put("text", node.optString("text", ""));
+        info.put("desc", node.optString("desc", ""));
+        info.put("bounds", b);
+        info.put("cx", cx);
+        info.put("cy", cy);
+        if (index >= 0) info.put("index", index);
+        resp.put("long_pressed", info);
+        logFindSafe(query, ok, 0, matchField(node, query == null ? "" : query.toLowerCase(Locale.ROOT)), t0);
         return resp;
     }
 
