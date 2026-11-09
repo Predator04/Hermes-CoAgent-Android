@@ -46,6 +46,10 @@ public final class ControlBanner {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable hideTask = this::hideInternal;
+    // Serialize attach/detach/apply posts onto the main thread so a late hide()
+    // can't overtake a pending attachViews and leak a window.
+    private Runnable pendingAttach;
+    private Runnable pendingDetach;
     private WindowManager wm;
 
     private View pillView;
@@ -105,7 +109,13 @@ public final class ControlBanner {
                 && !Settings.canDrawOverlays(app)) {
             return;
         }
-        main.post(() -> attachViews(app));
+        synchronized (this) {
+            if (pendingDetach != null) { main.removeCallbacks(pendingDetach); pendingDetach = null; }
+            if (pendingAttach != null) main.removeCallbacks(pendingAttach);
+            final Runnable r = () -> attachViews(app);
+            pendingAttach = r;
+            main.post(r);
+        }
     }
 
     private void attachViews(Context app) {
@@ -180,7 +190,13 @@ public final class ControlBanner {
     }
 
     private void hideInternal() {
-        main.post(this::detachViews);
+        synchronized (this) {
+            if (pendingAttach != null) { main.removeCallbacks(pendingAttach); pendingAttach = null; }
+            if (pendingDetach != null) main.removeCallbacks(pendingDetach);
+            final Runnable r = this::detachViews;
+            pendingDetach = r;
+            main.post(r);
+        }
     }
 
     private void detachViews() {

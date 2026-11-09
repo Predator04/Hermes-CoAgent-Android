@@ -12,19 +12,23 @@ public class ShellService extends Service {
     private final IShellService.Stub binder = new IShellService.Stub() {
         @Override
         public String exec(String command) {
+            Process p = null;
             try {
                 ProcessBuilder pb = new ProcessBuilder("sh", "-c", command == null ? "" : command);
                 pb.redirectErrorStream(true);
-                Process p = pb.start();
-                java.io.InputStream is = p.getInputStream();
-                byte[] buf = new byte[8192];
+                p = pb.start();
                 StringBuilder sb = new StringBuilder();
-                int n;
-                while ((n = is.read(buf)) != -1) sb.append(new String(buf, 0, n, "UTF-8"));
+                try (java.io.InputStream is = p.getInputStream()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = is.read(buf)) != -1) sb.append(new String(buf, 0, n, "UTF-8"));
+                }
                 p.waitFor();
                 return sb.toString();
             } catch (Throwable t) {
                 return "error: " + t;
+            } finally {
+                if (p != null) try { p.destroy(); } catch (Throwable ignored) {}
             }
         }
     };

@@ -14,6 +14,7 @@ public class RingStopReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (intent == null || context == null) return;
         if (ACTION_STOP_RING.equals(intent.getAction())) {
             CommandExecutor.stopRingFromNotification(context);
         }

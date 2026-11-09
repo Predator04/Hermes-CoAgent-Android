@@ -209,7 +209,7 @@ public class RemoteControlService extends Service {
             String path = rlParts.length > 1 ? rlParts[1] : "";
 
             // Parse headers
-            int contentLength = 0;
+            int contentLength = -1;
             String headerToken = null;
             String line;
             while ((line = br.readLine()) != null && !line.isEmpty()) {
@@ -218,7 +218,7 @@ public class RemoteControlService extends Service {
                 String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
                 String value = line.substring(colon + 1).trim();
                 if (name.equals("content-length")) {
-                    try { contentLength = Integer.parseInt(value); } catch (NumberFormatException nfe) { contentLength = 0; }
+                    try { contentLength = Integer.parseInt(value); } catch (NumberFormatException nfe) { contentLength = -1; }
                 } else if (name.equals(TOKEN_HEADER)) {
                     headerToken = value;
                 }
@@ -238,7 +238,12 @@ public class RemoteControlService extends Service {
                 return;
             }
 
-            if (contentLength < 0 || contentLength > MAX_BODY_BYTES) {
+            if (contentLength < 0) {
+                writeStatus(out, 411, "Length Required",
+                        "{\"ok\":false,\"error\":\"Content-Length required\"}");
+                return;
+            }
+            if (contentLength > MAX_BODY_BYTES) {
                 writeStatus(out, 413, "Payload Too Large",
                         "{\"ok\":false,\"error\":\"body too large\"}");
                 return;
@@ -250,6 +255,13 @@ public class RemoteControlService extends Service {
                 int r = br.read(body, read, contentLength - read);
                 if (r == -1) break;
                 read += r;
+            }
+            if (read < contentLength) {
+                // Premature EOF: reject rather than forwarding truncated JSON to
+                // the dispatcher, which would mis-parse / drop fields.
+                writeStatus(out, 400, "Bad Request",
+                        "{\"ok\":false,\"error\":\"truncated body\"}");
+                return;
             }
             String json = new String(body, 0, read);
             String response = CommandExecutor.execute(getApplicationContext(), json);
@@ -298,13 +310,16 @@ public class RemoteControlService extends Service {
 
     @Override
     public void onDestroy() {
+        // Close the ServerSocket FIRST so the accept() loop exits immediately,
+        // THEN flip running=false. The old order left the accept thread blocked
+        // on an open socket if the close() call was handled on a different path.
+        try { if (server != null) server.close(); } catch (Exception ignored) {}
+        server = null;
         running = false;
         isRunning = false;
         INSTANCE = null;
         releaseKeepAwake();
         try { ControlBanner.hide(); } catch (Throwable ignored) {}
-        try { if (server != null) server.close(); } catch (Exception ignored) {}
-        server = null;
         if (workers != null) {
             workers.shutdownNow();
             try { workers.awaitTermination(1, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}

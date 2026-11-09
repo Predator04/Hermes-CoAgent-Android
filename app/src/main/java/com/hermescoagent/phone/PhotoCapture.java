@@ -134,9 +134,19 @@ public final class PhotoCapture {
 
             // Dummy preview surface — some devices reject a session with only
             // an ImageReader target for TEMPLATE_STILL_CAPTURE.
-            final SurfaceTexture st = new SurfaceTexture(0);
-            st.setDefaultBufferSize(picked.getWidth(), picked.getHeight());
-            final Surface dummySurface = new Surface(st);
+            final SurfaceTexture st;
+            final Surface dummySurface;
+            try {
+                st = new SurfaceTexture(0);
+                st.setDefaultBufferSize(picked.getWidth(), picked.getHeight());
+                dummySurface = new Surface(st);
+            } catch (Throwable t) {
+                try { reader.close(); } catch (Throwable ignored) {}
+                try { ht.quitSafely(); } catch (Throwable ignored) {}
+                resp.put("ok", false);
+                resp.put("error", "surface setup: " + t);
+                return resp;
+            }
 
             final AtomicReference<CameraDevice> deviceRef = new AtomicReference<>();
             final AtomicReference<CameraCaptureSession> sessionRef = new AtomicReference<>();

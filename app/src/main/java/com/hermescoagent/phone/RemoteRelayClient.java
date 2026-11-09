@@ -158,12 +158,24 @@ public final class RemoteRelayClient {
                         String result = CommandExecutor.execute(appCtx, actionJson);
                         try {
                             postResult(base, deviceId, token, commandId, result);
+                        } catch (AuthException authErr) {
+                            // Token revoked on the server — disable relay so we
+                            // don't DoS it with retries that will never succeed.
+                            setEnabled(appCtx, false);
+                            setStatus(Status.ERROR, "auth rejected: " + authErr.getMessage());
+                            running = false;
+                            break;
                         } catch (Exception postErr) {
                             // If posting result fails, keep going — poll loop
                             // will recover on next iteration.
                         }
                     }
                 }
+            } catch (AuthException authErr) {
+                // Register/poll was rejected: disable to prevent infinite retry.
+                setEnabled(appCtx, false);
+                setStatus(Status.ERROR, "auth rejected: " + authErr.getMessage());
+                running = false;
             } catch (Exception e) {
                 setStatus(Status.ERROR, String.valueOf(e.getMessage()));
                 sleep(BACKOFF_MS);
@@ -203,6 +215,9 @@ public final class RemoteRelayClient {
             JSONObject o = new JSONObject(resp);
             JSONArray a = o.optJSONArray("commands");
             return a == null ? new JSONArray() : a;
+        } catch (AuthException ae) {
+            // Let the outer loop disable the relay — the token is bad / revoked.
+            throw ae;
         } catch (Exception e) {
             setStatus(Status.ERROR, "poll: " + e.getMessage());
             return null;
@@ -221,7 +236,9 @@ public final class RemoteRelayClient {
         } catch (Exception parse) {
             body.put("result", resultJson);
         }
-        httpJson("POST", base + "/result", body.toString(), SHORT_TIMEOUT_MS, null);
+        // Pass the token in the header too so relays that enforce header auth
+        // on /result (or future hardening) still authenticate the result POST.
+        httpJson("POST", base + "/result", body.toString(), SHORT_TIMEOUT_MS, token);
     }
 
     private static String enc(String s) {
@@ -256,6 +273,11 @@ public final class RemoteRelayClient {
             int code = c.getResponseCode();
             InputStream in = (code >= 200 && code < 400) ? c.getInputStream() : c.getErrorStream();
             String resp = readAll(in);
+            if (code == 401 || code == 403) {
+                // Auth failure: distinguish from 5xx/network so the caller can
+                // stop retrying with a revoked token instead of back-off-forever.
+                throw new AuthException("HTTP " + code + ": " + resp);
+            }
             if (code < 200 || code >= 400) {
                 throw new RuntimeException("HTTP " + code + ": " + resp);
             }
@@ -263,6 +285,12 @@ public final class RemoteRelayClient {
         } finally {
             c.disconnect();
         }
+    }
+
+    /** Thrown on 401/403 so the poll loop can disable the relay instead of
+     *  retrying forever against a server that will never accept the token. */
+    private static final class AuthException extends RuntimeException {
+        AuthException(String m) { super(m); }
     }
 
     private static String readAll(InputStream in) throws Exception {

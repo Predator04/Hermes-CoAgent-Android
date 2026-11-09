@@ -25,6 +25,7 @@ unset, any registered device token is accepted (single-device dev mode).
 In-memory only. Restart wipes state. Stdlib only.
 """
 
+import hmac
 import json
 import os
 import sys
@@ -41,6 +42,8 @@ RESULT_TTL_SEC = 300
 MAX_QUEUE_LEN = 200          # cap pending commands per device (queue-flood guard)
 MAX_DEVICES = 1000           # cap distinct registered device_ids (memory guard)
 MAX_FRAMES_PER_DEVICE = 200  # cap buffered watch-mode frames per device (drop oldest)
+DEVICE_IDLE_TTL_SEC = 24 * 60 * 60  # sweep devices unseen for 24h (queue+event+frames)
+SWEEP_INTERVAL_SEC = 300
 
 # Optional out-of-band controller token, set via env. When present, callers
 # may pass ?token=<CONTROLLER_TOKEN> to authenticate to GET /result and
@@ -54,6 +57,7 @@ _queues = {}          # device_id -> [ {command_id, action}, ... ]
 _results = {}         # command_id -> {"result": obj, "ts": epoch}
 _events = {}          # device_id -> threading.Event
 _frames = {}          # device_id -> [base64_str, ...] (watch-mode frames)
+_last_seen = {}       # device_id -> epoch of last successful auth touch
 
 
 def _event_for(device_id):
@@ -64,6 +68,10 @@ def _event_for(device_id):
     return ev
 
 
+def _touch_device_locked(device_id):
+    _last_seen[device_id] = time.time()
+
+
 def _prune_results_locked():
     cutoff = time.time() - RESULT_TTL_SEC
     stale = [cid for cid, r in _results.items() if r["ts"] < cutoff]
@@ -72,10 +80,46 @@ def _prune_results_locked():
         _result_owner.pop(cid, None)
 
 
+def _sweep_idle_devices_locked():
+    cutoff = time.time() - DEVICE_IDLE_TTL_SEC
+    for dev_id in list(_last_seen.keys()):
+        if _last_seen[dev_id] < cutoff:
+            _tokens.pop(dev_id, None)
+            _queues.pop(dev_id, None)
+            _frames.pop(dev_id, None)
+            ev = _events.pop(dev_id, None)
+            if ev is not None:
+                try: ev.set()  # unblock any lingering long-poll
+                except Exception: pass
+            _last_seen.pop(dev_id, None)
+
+
+def _sweeper():
+    while True:
+        time.sleep(SWEEP_INTERVAL_SEC)
+        try:
+            with _lock:
+                _prune_results_locked()
+                _sweep_idle_devices_locked()
+        except Exception:
+            # Sweeper must never die — the whole relay's health depends on it.
+            pass
+
+
+def _const_eq(a, b):
+    """Constant-time string compare. Prevents remote token-timing attacks."""
+    if a is None or b is None:
+        return False
+    try:
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except Exception:
+        return False
+
+
 def _auth_ok(device_id, token):
     """Caller holds _lock (or accepts race — it's an in-memory demo)."""
     known = _tokens.get(device_id)
-    return known is not None and known == token
+    return known is not None and _const_eq(known, token)
 
 
 def _controller_auth_ok_locked(token, device_id=None):
@@ -84,12 +128,12 @@ def _controller_auth_ok_locked(token, device_id=None):
     None) matches ANY registered device token. Caller holds _lock."""
     if not token:
         return False
-    if _CONTROLLER_TOKEN and token == _CONTROLLER_TOKEN:
+    if _CONTROLLER_TOKEN and _const_eq(token, _CONTROLLER_TOKEN):
         return True
     if device_id is not None:
         return _auth_ok(device_id, token)
     for dev_token in _tokens.values():
-        if token == dev_token:
+        if _const_eq(token, dev_token):
             return True
     return False
 
@@ -165,18 +209,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(400, {"ok": False, "error": "device_id and token required"})
             with _lock:
                 existing = _tokens.get(device_id)
-                if existing is not None and existing != token:
+                if existing is not None and not _const_eq(existing, token):
                     # Someone else already claimed this device_id. Allow rotation
                     # only if the caller proves knowledge of the previous token
                     # (X-Hermes-Token header) or holds the controller token.
                     proof = self._header_token()
-                    if proof != existing and not (_CONTROLLER_TOKEN and proof == _CONTROLLER_TOKEN):
+                    if not _const_eq(proof, existing) and not (_CONTROLLER_TOKEN and _const_eq(proof, _CONTROLLER_TOKEN)):
                         return self._send_json(409, {"ok": False, "error": "device_id already registered"})
                 if existing is None and len(_tokens) >= MAX_DEVICES:
                     return self._send_json(429, {"ok": False, "error": "device registry full"})
                 _tokens[device_id] = token
                 _queues.setdefault(device_id, [])
                 _event_for(device_id)
+                _touch_device_locked(device_id)
             return self._send_json(200, {"ok": True})
 
         if path == "/command":
@@ -194,7 +239,10 @@ class Handler(BaseHTTPRequestHandler):
                 cid = uuid.uuid4().hex
                 q.append({"command_id": cid, "action": action})
                 ev = _event_for(device_id)
-            ev.set()
+                _touch_device_locked(device_id)
+                # Set the signal while holding the lock so a poll clearing
+                # the event between queue-append and set() can't lose a wakeup.
+                ev.set()
             return self._send_json(200, {"ok": True, "command_id": cid})
 
         if path == "/result":
@@ -210,6 +258,7 @@ class Handler(BaseHTTPRequestHandler):
                 _prune_results_locked()
                 _results[command_id] = {"result": result, "ts": time.time()}
                 _result_owner[command_id] = device_id
+                _touch_device_locked(device_id)
             return self._send_json(200, {"ok": True})
 
         if path == "/frame":
@@ -227,6 +276,7 @@ class Handler(BaseHTTPRequestHandler):
                     # drop oldest
                     del buf[:len(buf) - MAX_FRAMES_PER_DEVICE]
                 buffered = len(buf)
+                _touch_device_locked(device_id)
             return self._send_json(200, {"ok": True, "buffered": buffered})
 
         return self._send_json(404, {"ok": False, "error": "unknown endpoint"})
@@ -245,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 if not _auth_ok(device_id, token):
                     return self._send_json(401, {"ok": False, "error": "unknown device or bad token"})
+                _touch_device_locked(device_id)
                 queued = _queues.get(device_id, [])
                 if queued:
                     _queues[device_id] = []
@@ -281,7 +332,13 @@ class Handler(BaseHTTPRequestHandler):
                 # "any known token" — it must match the owning device.
                 owner = _result_owner.get(command_id)
                 bound_device = device_id or owner
-                if not _controller_auth_ok_locked(token, bound_device):
+                # If no bound_device can be resolved, only the controller token
+                # may read. Otherwise ANY device token would authenticate here,
+                # which is the auth bypass flagged in the audit.
+                if bound_device is None:
+                    if not (_CONTROLLER_TOKEN and _const_eq(token, _CONTROLLER_TOKEN)):
+                        return self._send_json(401, {"ok": False, "error": "unknown command"})
+                elif not _controller_auth_ok_locked(token, bound_device):
                     return self._send_json(401, {"ok": False, "error": "bad token"})
                 r = _results.get(command_id)
             if r is None:
@@ -329,6 +386,10 @@ def main():
         except ValueError:
             print("usage: relay.py [port]", file=sys.stderr)
             sys.exit(2)
+    # Background sweeper: evicts idle devices + stale results so a phone that
+    # disappears doesn't pin its queue/event/frames in memory forever.
+    threading.Thread(target=_sweeper, name="hermes-sweeper", daemon=True).start()
+
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print("hermes-relay listening on 0.0.0.0:%d" % port, flush=True)
     try:

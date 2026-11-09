@@ -116,7 +116,7 @@ public final class CommandExecutor {
     private static Integer savedDndFilter;
     private static Integer savedAlarmVolume;
     private static Integer savedRingVolume;
-    private static boolean ringActive;
+    private static volatile boolean ringActive;
 
     // ─── TTS ─────────────────────────────────────────────────────────────
     private static TextToSpeech tts;
@@ -240,7 +240,12 @@ public final class CommandExecutor {
             case "tap": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
-                else resp.put("ok", s.tap(req.getInt("x"), req.getInt("y")));
+                else {
+                    // Optional hold_ms so the agent can tune for apps that only
+                    // register taps past ~100ms contact; default 80ms is unchanged.
+                    long hold = req.has("hold_ms") ? req.optLong("hold_ms", 80L) : 80L;
+                    resp.put("ok", s.tap(req.getInt("x"), req.getInt("y"), hold));
+                }
                 break;
             }
             case "long_press": {
@@ -254,6 +259,17 @@ public final class CommandExecutor {
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
                 else resp.put("ok", s.swipe(req.getInt("x1"), req.getInt("y1"),
                         req.getInt("x2"), req.getInt("y2"), req.optLong("duration", 300)));
+                break;
+            }
+            case "pinch": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    int cx = req.getInt("x"); int cy = req.getInt("y");
+                    float scale = (float) req.optDouble("scale", 1.5);
+                    long dur = req.optLong("duration", 400);
+                    return s.pinchDetailed(cx, cy, scale, dur);
+                }
                 break;
             }
             case "tap_rel": {
@@ -494,8 +510,10 @@ public final class CommandExecutor {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
                 else {
+                    long t0 = System.currentTimeMillis();
                     int findIndex = req.optInt("index", -1);
-                    return s.findAndTap(req.optString("query"), findIndex);
+                    JSONObject inner = s.findAndTap(req.optString("query"), findIndex);
+                    return envelopeFind(inner, "find_tap", t0);
                 }
                 break;
             }
@@ -503,11 +521,13 @@ public final class CommandExecutor {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
                 else {
+                    long t0 = System.currentTimeMillis();
                     int idx = req.optInt("index", -1);
                     long dur = req.optLong("duration", 800);
                     if (dur < 100) dur = 100;
                     if (dur > 5000) dur = 5000;
-                    return s.findAndLongPress(req.optString("query"), idx, dur);
+                    JSONObject inner = s.findAndLongPress(req.optString("query"), idx, dur);
+                    return envelopeFind(inner, "find_long_press", t0);
                 }
                 break;
             }
@@ -833,6 +853,25 @@ public final class CommandExecutor {
         return resp;
     }
 
+    /** Wrap a find_*-style inner result with the dispatch envelope used by
+     *  every other action: {ok, action, elapsed_ms, ...inner fields}.
+     *  Preserves the original {@code ok} and {@code error} shape. */
+    private static JSONObject envelopeFind(JSONObject inner, String action, long startMs) {
+        JSONObject out = new JSONObject();
+        try {
+            out.put("ok", inner.optBoolean("ok", false));
+            out.put("action", action);
+            out.put("elapsed_ms", System.currentTimeMillis() - startMs);
+            java.util.Iterator<String> it = inner.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k.equals("ok")) continue;
+                out.put(k, inner.get(k));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
     // ────────────────────────── help / actions ──────────────────────────
 
     /** Build one self-describing catalog entry. Never throws. */
@@ -859,9 +898,10 @@ public final class CommandExecutor {
         arr.put(helpEntry("tap", "x,y", "input", "Tap screen coordinates"));
         arr.put(helpEntry("long_press", "x,y,duration", "input", "Long press screen coordinates"));
         arr.put(helpEntry("swipe", "x1,y1,x2,y2,duration", "input", "Swipe from one point to another"));
+        arr.put(helpEntry("pinch", "x,y,scale,duration", "input", "Pinch zoom at a point; scale over 1 zooms IN (spread), under 1 zooms OUT (pinch). scale near 1 returns a no-op error."));
         arr.put(helpEntry("tap_rel", "x,y", "input", "Tap by fractional coordinates 0..1 or center"));
         arr.put(helpEntry("swipe_rel", "x1,y1,x2,y2,duration", "input", "Swipe by fractional coordinates 0..1 or center"));
-        arr.put(helpEntry("type", "text", "input", "Type text without the soft keyboard"));
+        arr.put(helpEntry("type", "text", "input", "Type text without the soft keyboard. Prefers ACTION_SET_TEXT; falls back to clipboard+paste for composed characters (emoji, surrogate pairs) that some IMEs reject."));
         arr.put(helpEntry("key", "code", "input", "Global key (back, home, recents, notifications, quick_settings)"));
         arr.put(helpEntry("dump", "", "input", "Dump accessibility tree with text, desc and bounds per node"));
         arr.put(helpEntry("find", "query", "input", "Find nodes whose text or desc contains query"));
@@ -1470,7 +1510,11 @@ public final class CommandExecutor {
         }
     }
 
-    private static final java.util.HashMap<String, Boolean> flashCurrentlyOn = new java.util.HashMap<>();
+    // Concurrent map: flash state is read/written from UI, ring, and location-
+    // callback threads. ConcurrentHashMap gives atomic get/put/getOrDefault and
+    // a snapshot-safe values() iterator for stopRing's "any flash on?" check.
+    private static final java.util.concurrent.ConcurrentHashMap<String, Boolean> flashCurrentlyOn =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     // ────────────────────────────── speak ────────────────────────────────
 
@@ -2475,6 +2519,9 @@ public final class CommandExecutor {
         int duration = (int) Math.max(1, Math.min(60, Math.round(req.optDouble("duration", 20.0))));
         double interval = Math.max(0.5, Math.min(5.0, req.optDouble("interval", 1.5)));
         long intervalMs = (long) (interval * 1000);
+        float watchScale = (float) Math.max(0.1, Math.min(1.0, req.optDouble("scale", 0.5)));
+        int watchQuality = Math.max(1, Math.min(100, req.optInt("quality", 60)));
+        int watchMaxEdge = Math.max(0, req.optInt("max_edge", 1080));
 
         String base = normalizeRelayUrl(RemoteRelayClient.getRelayUrl(ctx));
         String deviceId = RemoteRelayClient.ensureDeviceId(ctx);
@@ -2492,7 +2539,7 @@ public final class CommandExecutor {
         try {
             while (System.currentTimeMillis() < endMs) {
                 long tickStart = System.currentTimeMillis();
-                byte[] jpeg = s.captureScreenJpeg(0.5f, 60);
+                byte[] jpeg = s.captureScreenJpeg(watchScale, watchQuality, watchMaxEdge);
                 if (jpeg != null) {
                     final String b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP);
                     if (!base.isEmpty()) {
@@ -3526,9 +3573,21 @@ public final class CommandExecutor {
                 session.fsync(sOut);
             }
             statusHandle = installStatusSender(ctx, "INSTALL", sessionId);
-            session.commit(statusHandle.sender);
-            statusHandle = null; // ownership handed to PackageInstaller — do not unregister below
-            started = true;
+            // Capture the handle locally so we can null the finally guard
+            // BEFORE commit() — if commit throws AFTER handing off ownership to
+            // PackageInstaller (platform behavior on some ROMs), the finally
+            // block must not try to unregister an already-handed-off receiver.
+            final InstallStatusHandle local = statusHandle;
+            statusHandle = null;
+            try {
+                session.commit(local.sender);
+                started = true;
+            } catch (Throwable commitErr) {
+                // Handoff never happened (or partially) — unregister ourselves
+                // to avoid leaking the receiver. Idempotent.
+                local.unregister();
+                throw commitErr;
+            }
         } catch (Throwable t) {
             startError = String.valueOf(t);
         } finally {

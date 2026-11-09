@@ -17,6 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Periodic GPS breadcrumb logger. When enabled, requests a fused location
@@ -131,9 +133,9 @@ public final class LocationTracker {
 
     @SuppressWarnings("MissingPermission")
     private static Location currentLocationBlocking(LocationManager lm) {
-        final Location[] out = { null };
+        final AtomicReference<Location> out = new AtomicReference<>();
+        final AtomicBoolean done = new AtomicBoolean(false);
         final Object lk = new Object();
-        final boolean[] done = { false };
         try {
             String provider = LocationManager.FUSED_PROVIDER;
             if (!lm.isProviderEnabled(provider)) {
@@ -145,11 +147,15 @@ public final class LocationTracker {
             lm.getCurrentLocation(provider, cs,
                     callbackExec(),
                     location -> {
-                        synchronized (lk) { out[0] = location; done[0] = true; lk.notifyAll(); }
+                        // Callback can fire after cs.cancel(); still safe to publish
+                        // via AtomicReference instead of racing a bare array write.
+                        out.set(location);
+                        done.set(true);
+                        synchronized (lk) { lk.notifyAll(); }
                     });
             synchronized (lk) {
                 long deadline = System.currentTimeMillis() + FIX_TIMEOUT_MS;
-                while (!done[0]) {
+                while (!done.get()) {
                     long left = deadline - System.currentTimeMillis();
                     if (left <= 0) { cs.cancel(); break; }
                     try { lk.wait(left); }
@@ -157,7 +163,7 @@ public final class LocationTracker {
                 }
             }
         } catch (Throwable ignored) {}
-        return out[0];
+        return out.get();
     }
 
     private static void append(Context ctx, Location loc) {

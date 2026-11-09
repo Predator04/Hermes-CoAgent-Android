@@ -24,6 +24,7 @@ import android.view.WindowManager;
  */
 public final class PointerOverlay extends View {
 
+    private static final Object LOCK = new Object();
     private static PointerOverlay instance;
 
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -53,13 +54,19 @@ public final class PointerOverlay extends View {
                 && !Settings.canDrawOverlays(app)) {
             return;
         }
-        if (instance == null) instance = new PointerOverlay(app);
-        instance.moveTo(app, x, y);
+        PointerOverlay inst;
+        synchronized (LOCK) {
+            if (instance == null) instance = new PointerOverlay(app);
+            inst = instance;
+        }
+        inst.moveTo(app, x, y);
     }
 
     /** Remove the cursor overlay entirely (control session ended). */
     public static void hide() {
-        if (instance != null) instance.detach();
+        PointerOverlay inst;
+        synchronized (LOCK) { inst = instance; }
+        if (inst != null) inst.detach();
     }
 
     private void moveTo(Context app, int x, int y) {
@@ -76,34 +83,42 @@ public final class PointerOverlay extends View {
     }
 
     private void attachIfNeeded(Context app) {
-        if (attached) return;
-        wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
-        if (wm == null) return;
-        int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                : WindowManager.LayoutParams.TYPE_PHONE;
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        wm.addView(this, lp);
-        attached = true;
+        synchronized (LOCK) {
+            if (attached) return;
+            wm = (WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return;
+            int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : WindowManager.LayoutParams.TYPE_PHONE;
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            try {
+                wm.addView(this, lp);
+                attached = true;
+            } catch (Throwable ignored) {
+                attached = false;
+            }
+        }
     }
 
     private void detach() {
         main.post(() -> {
             stopPulse();
-            if (attached && wm != null) {
-                try { wm.removeView(this); } catch (Throwable ignored) {}
+            synchronized (LOCK) {
+                if (attached && wm != null) {
+                    try { wm.removeView(this); } catch (Throwable ignored) {}
+                }
+                attached = false;
+                if (instance == this) instance = null;
             }
-            attached = false;
-            instance = null;
         });
     }
 

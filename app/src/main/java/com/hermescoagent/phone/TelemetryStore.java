@@ -98,46 +98,49 @@ public class TelemetryStore extends SQLiteOpenHelper {
             where = "WHERE package = ?";
             args = new String[]{pkg};
         }
-        Cursor c = db.rawQuery(
+        JSONArray per = new JSONArray();
+        try (Cursor c = db.rawQuery(
                 "SELECT package, COUNT(*) AS n, COALESCE(SUM(success),0) AS ok, "
                         + "AVG(tree_nodes) AS avg_nodes, AVG(duration_ms) AS avg_ms "
                         + "FROM find_events " + where + " GROUP BY package ORDER BY n DESC",
-                args);
-        JSONArray per = new JSONArray();
-        while (c.moveToNext()) {
-            String p = c.getString(0);
-            int n = c.getInt(1);
-            int ok = c.getInt(2);
-            double rate = n > 0 ? (double) ok / n : 0.0;
-            double avgNodes = c.getDouble(3);
-            JSONObject o = new JSONObject();
-            o.put("package", p);
-            o.put("find_attempts", n);
-            o.put("find_success_rate", Math.round(rate * 1000.0) / 1000.0);
-            o.put("avg_tree_nodes", Math.round(avgNodes));
-            o.put("avg_duration_ms", Math.round(c.getDouble(4)));
-            o.put("opaque", n >= 2 && avgNodes < 2.0 && rate < 0.5);
-            per.put(o);
-        }
-        c.close();
-
-        // top match field (text vs desc) per package
-        Cursor f = db.rawQuery(
-                "SELECT package, match_field, COUNT(*) AS n FROM find_events "
-                        + "WHERE match_field != '' " + where + " GROUP BY package, match_field",
-                args);
-        Map<String, String> topField = new HashMap<>();
-        Map<String, Integer> topN = new HashMap<>();
-        while (f.moveToNext()) {
-            String p = f.getString(0);
-            String mf = f.getString(1);
-            int n = f.getInt(2);
-            if (n > (topN.containsKey(p) ? topN.get(p) : 0)) {
-                topN.put(p, n);
-                topField.put(p, mf);
+                args)) {
+            while (c.moveToNext()) {
+                String p = c.getString(0);
+                int n = c.getInt(1);
+                int ok = c.getInt(2);
+                double rate = n > 0 ? (double) ok / n : 0.0;
+                double avgNodes = c.getDouble(3);
+                JSONObject o = new JSONObject();
+                o.put("package", p);
+                o.put("find_attempts", n);
+                o.put("find_success_rate", Math.round(rate * 1000.0) / 1000.0);
+                o.put("avg_tree_nodes", Math.round(avgNodes));
+                o.put("avg_duration_ms", Math.round(c.getDouble(4)));
+                o.put("opaque", n >= 2 && avgNodes < 2.0 && rate < 0.5);
+                per.put(o);
             }
         }
-        f.close();
+
+        // top match field (text vs desc) per package
+        Map<String, String> topField = new HashMap<>();
+        Map<String, Integer> topN = new HashMap<>();
+        String fieldWhere = where.isEmpty()
+                ? "WHERE match_field != ''"
+                : where + " AND match_field != ''";
+        try (Cursor f = db.rawQuery(
+                "SELECT package, match_field, COUNT(*) AS n FROM find_events "
+                        + fieldWhere + " GROUP BY package, match_field",
+                args)) {
+            while (f.moveToNext()) {
+                String p = f.getString(0);
+                String mf = f.getString(1);
+                int n = f.getInt(2);
+                if (n > (topN.containsKey(p) ? topN.get(p) : 0)) {
+                    topN.put(p, n);
+                    topField.put(p, mf);
+                }
+            }
+        }
         for (int i = 0; i < per.length(); i++) {
             String p = per.getJSONObject(i).optString("package", "");
             if (topField.containsKey(p)) {

@@ -62,6 +62,12 @@ public class HermesAccessibilityService extends AccessibilityService {
     private static final int MAX_DUMP_DEPTH = 24;
     private static final int MAX_FIND_MATCHES = 20;
     private static final long DUMP_TIMEOUT_MS = 3000L;
+    // If dumpNodes() times out and we have a recent snapshot, return it so a
+    // stuck UI doesn't starve every subsequent find/toggle.
+    private static final long STALE_DUMP_FALLBACK_MS = 10_000L;
+
+    private volatile JSONArray lastGoodDump;
+    private volatile long lastGoodDumpTs;
 
     @Override
     protected void onServiceConnected() {
@@ -108,12 +114,20 @@ public class HermesAccessibilityService extends AccessibilityService {
     }
 
     public boolean tap(int x, int y) {
+        return tap(x, y, 80L);
+    }
+
+    /** Tap with explicit press-hold duration. Short ~60ms → cleaner tap on
+     *  twitchy UIs; ~200ms → nearly long-press territory, use sparingly. */
+    public boolean tap(int x, int y, long holdMs) {
         PointerOverlay.show(this, x, y);
+        long hold = Math.max(10L, Math.min(300L, holdMs));
         Path p = new Path();
         p.moveTo(x, y);
         GestureDescription g = new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(p, 0, 80)).build();
-        return dispatchGesture(g, null, null);
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, hold)).build();
+        GestureOutcome o = dispatchBlocking(g, hold + 400L);
+        return o.completed;
     }
 
     public boolean longPress(int x, int y, long durationMs) {
@@ -123,7 +137,8 @@ public class HermesAccessibilityService extends AccessibilityService {
         p.moveTo(x, y);
         GestureDescription g = new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(p, 0, duration)).build();
-        return dispatchGesture(g, null, null);
+        GestureOutcome o = dispatchBlocking(g, duration + 400L);
+        return o.completed;
     }
 
     public boolean swipe(int x1, int y1, int x2, int y2, long durationMs) {
@@ -135,7 +150,121 @@ public class HermesAccessibilityService extends AccessibilityService {
         p.lineTo(x2, y2);
         GestureDescription g = new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(p, 0, duration)).build();
-        return dispatchGesture(g, null, null);
+        GestureOutcome o = dispatchBlocking(g, duration + 400L);
+        return o.completed;
+    }
+
+    /** Result of a dispatched gesture: whether the system accepted the
+     *  gesture, whether it ran to completion, or whether it was cancelled. */
+    private static final class GestureOutcome {
+        final boolean dispatched;
+        final boolean completed;
+        final boolean cancelled;
+        GestureOutcome(boolean d, boolean c, boolean x) {
+            dispatched = d; completed = c; cancelled = x;
+        }
+    }
+
+    /** Dispatch a gesture and block (up to {@code timeoutMs}) for the result
+     *  callback. Used so {@code ok} in command responses reflects whether the
+     *  gesture actually ran, not merely whether it was accepted. */
+    private GestureOutcome dispatchBlocking(GestureDescription g, long timeoutMs) {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final boolean[] state = { false, false }; // [completed, cancelled]
+        boolean dispatched;
+        try {
+            dispatched = dispatchGesture(g, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription gesture) {
+                    state[0] = true; latch.countDown();
+                }
+                @Override public void onCancelled(GestureDescription gesture) {
+                    state[1] = true; latch.countDown();
+                }
+            }, null);
+        } catch (Throwable t) {
+            return new GestureOutcome(false, false, false);
+        }
+        if (!dispatched) return new GestureOutcome(false, false, false);
+        try {
+            if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+                // Callback never fired — treat as dispatched-but-unknown.
+                return new GestureOutcome(true, false, false);
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return new GestureOutcome(true, false, false);
+        }
+        return new GestureOutcome(true, state[0], state[1]);
+    }
+
+    /**
+     * Two-finger pinch at (cx,cy). {@code scale} > 1 spreads the fingers
+     * apart → zoom IN; {@code scale} < 1 brings them together → zoom OUT.
+     * Radius is density-scaled (~40dp baseline) and clamped to the distance
+     * from the nearest screen edge so endpoints never land off-screen.
+     * Returns an error when {@code scale ≈ 1} (would be a stationary
+     * two-finger hold, not a real pinch gesture).
+     */
+    public JSONObject pinchDetailed(int cx, int cy, float scale, long durationMs) throws JSONException {
+        JSONObject resp = new JSONObject();
+        if (Float.isNaN(scale) || Math.abs(scale - 1.0f) < 0.02f) {
+            resp.put("ok", false);
+            resp.put("error", "scale ≈ 1 is a no-op");
+            return resp;
+        }
+        long duration = Math.max(MIN_SWIPE_MS, Math.min(MAX_SWIPE_MS, durationMs));
+
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        // 40dp baseline — a single-element tap target is ~48dp, so the fingers
+        // start outside one UI element on normal-density displays.
+        float baseRadius = 40f * dm.density;
+        // Clamp to the distance to the nearest edge so BOTH stroke endpoints
+        // stay on-screen even near the sides — some OEMs silently drop
+        // gestures that start outside the display rect.
+        float edgeMargin = Math.max(1f, Math.min(cx, dm.widthPixels - cx) - dm.density * 2f);
+        float pinchRadius = Math.max(1f, Math.min(baseRadius, edgeMargin));
+        float endRadius = pinchRadius * scale;
+        // Keep the end-radius on-screen too.
+        endRadius = Math.max(1f, Math.min(edgeMargin, endRadius));
+        float effectiveScale = pinchRadius > 0 ? (endRadius / pinchRadius) : 1f;
+
+        float leftStartX = cx - pinchRadius, leftEndX = cx - endRadius;
+        float rightStartX = cx + pinchRadius, rightEndX = cx + endRadius;
+
+        // Show the cursor at BOTH fingers so the owner can see what the agent
+        // is actually doing (not just the center).
+        PointerOverlay.show(this, (int) leftStartX, cy);
+        PointerOverlay.show(this, (int) rightStartX, cy);
+
+        Path p1 = new Path();
+        p1.moveTo(leftStartX, cy);
+        p1.lineTo(leftEndX, cy);
+        Path p2 = new Path();
+        p2.moveTo(rightStartX, cy);
+        p2.lineTo(rightEndX, cy);
+        GestureDescription g = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(p1, 0, duration))
+                .addStroke(new GestureDescription.StrokeDescription(p2, 0, duration))
+                .build();
+        GestureOutcome o = dispatchBlocking(g, duration + 400L);
+        resp.put("ok", o.completed);
+        resp.put("dispatched", o.dispatched);
+        resp.put("completed", o.completed);
+        resp.put("cancelled", o.cancelled);
+        resp.put("scale", scale);
+        resp.put("effective_scale", (double) effectiveScale);
+        resp.put("pinch_radius", (int) pinchRadius);
+        resp.put("duration", duration);
+        return resp;
+    }
+
+    public boolean pinch(int cx, int cy, float scale, long durationMs) {
+        try {
+            JSONObject r = pinchDetailed(cx, cy, scale, durationMs);
+            return r.optBoolean("ok", false);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public boolean globalAction(String code) {
@@ -172,7 +301,13 @@ public class HermesAccessibilityService extends AccessibilityService {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return true;
-        // Fallback: set clipboard + paste on focused node.
+        // Some OEM ROMs land focus asynchronously — retry once after a brief
+        // settle before falling back to the paste path. Prefer this to paste
+        // because paste leaves the clipboard dirty for the user.
+        try { Thread.sleep(80); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return true;
+        // Fallback: set clipboard + paste on focused node. Robust for composed
+        // characters (emoji, surrogate pairs) that some IMEs reject via SET_TEXT.
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) {
@@ -212,39 +347,20 @@ public class HermesAccessibilityService extends AccessibilityService {
         return ref.get();
     }
 
-    /** Find the best-matching live node by text/label query (same heuristic as
-     *  toggle/findAndTap). Returns null when nothing matches. */
+    /** Find the best-matching live node by text/label query. Delegates to
+     *  {@link #findMatchByIndex} so ranking logic lives in one place. */
     private AccessibilityNodeInfo findLiveNode(String query) {
-        JSONArray all = dumpNodes();
-        if (all == null) return null;
-        String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
-        JSONObject best = null;
-        JSONObject firstMatch = null;
-        long bestArea = Long.MAX_VALUE;
-        boolean bestClickable = false;
-        for (int i = 0; i < all.length(); i++) {
-            JSONObject n = all.optJSONObject(i);
-            if (n == null || !matches(n, q)) continue;
-            if (firstMatch == null) firstMatch = n;
-            JSONArray b = n.optJSONArray("bounds");
-            if (b == null || b.length() < 4) continue;
-            long area = (long)(b.optInt(2) - b.optInt(0)) * (long)(b.optInt(3) - b.optInt(1));
-            if (area <= 0) continue;
-            boolean clickable = n.optBoolean("clickable", false);
-            boolean better;
-            if (best == null) better = true;
-            else if (clickable && !bestClickable) better = true;
-            else if (clickable == bestClickable && area < bestArea) better = true;
-            else better = false;
-            if (better) { best = n; bestArea = area; bestClickable = clickable; }
+        try {
+            JSONObject best = findMatchByIndex(query, -1);
+            if (best == null) return null;
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return null;
+            final AccessibilityNodeInfo[] found = new AccessibilityNodeInfo[1];
+            walkLiveNode(root, 0, best.optInt("id", -1), 0, found);
+            return found[0];
+        } catch (JSONException je) {
+            return null;
         }
-        if (best == null) best = firstMatch;
-        if (best == null) return null;
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return null;
-        final AccessibilityNodeInfo[] found = new AccessibilityNodeInfo[1];
-        walkLiveNode(root, 0, best.optInt("id", -1), 0, found);
-        return found[0];
     }
 
     /** Type into a specific node found by query (uses ACTION_SET_TEXT directly,
@@ -375,8 +491,15 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (node == null) return null;
         if (node.isScrollable()) return node;
         for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findFirstScrollable(node.getChild(i));
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            AccessibilityNodeInfo r = findFirstScrollable(c);
             if (r != null) return r;
+            // Recycle only if this wasn't the one we're returning — the
+            // caller owns the returned node's lifetime on pre-API-33.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                try { c.recycle(); } catch (Throwable ignored) {}
+            }
         }
         return null;
     }
@@ -385,8 +508,13 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (node == null) return null;
         if (node.isEditable() && node.isFocused()) return node;
         for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findFocusedEditable(node.getChild(i));
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            AccessibilityNodeInfo r = findFocusedEditable(c);
             if (r != null) return r;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                try { c.recycle(); } catch (Throwable ignored) {}
+            }
         }
         return null;
     }
@@ -395,8 +523,13 @@ public class HermesAccessibilityService extends AccessibilityService {
         if (node == null) return null;
         if (node.isEditable()) return node;
         for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findFirstEditable(node.getChild(i));
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            AccessibilityNodeInfo r = findFirstEditable(c);
             if (r != null) return r;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                try { c.recycle(); } catch (Throwable ignored) {}
+            }
         }
         return null;
     }
@@ -425,12 +558,25 @@ public class HermesAccessibilityService extends AccessibilityService {
             }
         });
         try {
-            if (!latch.await(DUMP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return null;
+            if (!latch.await(DUMP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                // Fall back to the most recent successful dump if it's fresh
+                // enough. Keeps find/toggle responsive while the main thread
+                // is briefly blocked (OEM animations, cold activity start).
+                JSONArray stale = lastGoodDump;
+                long age = System.currentTimeMillis() - lastGoodDumpTs;
+                if (stale != null && age < STALE_DUMP_FALLBACK_MS) return stale;
+                return null;
+            }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             return null;
         }
-        return result[0];
+        JSONArray out = result[0];
+        if (out != null && out.length() > 0) {
+            lastGoodDump = out;
+            lastGoodDumpTs = System.currentTimeMillis();
+        }
+        return out;
     }
 
     private void walkNode(AccessibilityNodeInfo n, int depth, JSONArray out) throws JSONException {
@@ -455,7 +601,18 @@ public class HermesAccessibilityService extends AccessibilityService {
         int cc = n.getChildCount();
         for (int i = 0; i < cc; i++) {
             if (out.length() >= MAX_DUMP_NODES) return;
-            walkNode(n.getChild(i), depth + 1, out);
+            AccessibilityNodeInfo child = n.getChild(i);
+            if (child == null) continue;
+            try {
+                walkNode(child, depth + 1, out);
+            } finally {
+                // On API ≤ 32 every getChild() returns a node that must be
+                // recycle()d or long sessions leak memory in the system_server
+                // accessibility cache. Deprecated no-op on API 33+.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    try { child.recycle(); } catch (Throwable ignored) {}
+                }
+            }
         }
     }
 
@@ -608,31 +765,14 @@ public class HermesAccessibilityService extends AccessibilityService {
      */
     public JSONObject toggle(String query) throws JSONException {
         JSONObject resp = new JSONObject();
-        JSONArray all = dumpNodes();
-        if (all == null) { resp.put("ok", false); resp.put("error", "dump timeout"); return resp; }
-        String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
-        JSONObject best = null;
-        JSONObject firstMatch = null;
-        long bestArea = Long.MAX_VALUE;
-        boolean bestClickable = false;
-        for (int i = 0; i < all.length(); i++) {
-            JSONObject n = all.optJSONObject(i);
-            if (n == null || !matches(n, q)) continue;
-            if (firstMatch == null) firstMatch = n;
-            JSONArray b = n.optJSONArray("bounds");
-            if (b == null || b.length() < 4) continue;
-            long area = (long)(b.optInt(2) - b.optInt(0)) * (long)(b.optInt(3) - b.optInt(1));
-            if (area <= 0) continue;
-            boolean clickable = n.optBoolean("clickable", false);
-            boolean better;
-            if (best == null) better = true;
-            else if (clickable && !bestClickable) better = true;
-            else if (clickable == bestClickable && area < bestArea) better = true;
-            else better = false;
-            if (better) { best = n; bestArea = area; bestClickable = clickable; }
+        JSONObject best = findMatchByIndex(query, -1);
+        if (best == null) {
+            // Distinguish "dump failed" from "no match" so the caller knows
+            // whether to retry or move on.
+            JSONArray all = dumpNodes();
+            if (all == null) { resp.put("ok", false); resp.put("error", "dump timeout"); return resp; }
+            resp.put("ok", false); resp.put("error", "no matching node"); return resp;
         }
-        if (best == null) best = firstMatch;
-        if (best == null) { resp.put("ok", false); resp.put("error", "no matching node"); return resp; }
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) { resp.put("ok", false); resp.put("error", "no active window"); return resp; }
         int targetIndex = best.optInt("id", -1);
@@ -659,6 +799,11 @@ public class HermesAccessibilityService extends AccessibilityService {
     // Walk the live AccessibilityNodeInfo tree in the same pre-order as
     // dumpNodes so an "id" from the dump maps to a real node. Depth and node
     // caps mirror walkNode so indices stay aligned even in dense trees.
+    //
+    // CRITICAL: countSubtree must share the same flat-index cap that walkNode
+    // applies (dump stops at MAX_DUMP_NODES total nodes, not per subtree). We
+    // thread the current flat index through so countSubtree knows how many
+    // slots remain and reports the subtree size the dump actually consumed.
     private void walkLiveNode(AccessibilityNodeInfo n, int index, int targetIndex,
                               int depth, AccessibilityNodeInfo[] out) {
         if (n == null || out[0] != null) return;
@@ -673,20 +818,32 @@ public class HermesAccessibilityService extends AccessibilityService {
             if (child == null) continue;
             walkLiveNode(child, childIndex, targetIndex, depth + 1, out);
             if (out[0] != null) return;
-            childIndex += countSubtree(child, depth + 1) + 1;
+            int subtree = countSubtreeBounded(child, depth + 1, childIndex + 1);
+            childIndex += subtree + 1;
         }
     }
 
-    private int countSubtree(AccessibilityNodeInfo n, int depth) {
+    /**
+     * Count how many nodes the dump-order walker would consume for this
+     * subtree, respecting both the depth cap AND the global {@link
+     * #MAX_DUMP_NODES} flat-index cap (so the index returned matches what
+     * {@link #walkNode} actually indexed into the dump).
+     *
+     * @param flatIndexStart the flat dump-index this subtree would start at.
+     */
+    private int countSubtreeBounded(AccessibilityNodeInfo n, int depth, int flatIndexStart) {
         if (n == null) return 0;
         if (depth >= MAX_DUMP_DEPTH) return 0;
+        if (flatIndexStart >= MAX_DUMP_NODES) return 0;
         int total = 0;
         int cc = n.getChildCount();
         for (int i = 0; i < cc; i++) {
+            if (flatIndexStart + total >= MAX_DUMP_NODES) return total;
             AccessibilityNodeInfo child = n.getChild(i);
             if (child == null) continue;
-            total += 1 + countSubtree(child, depth + 1);
-            if (total >= MAX_DUMP_NODES) return MAX_DUMP_NODES;
+            total += 1;
+            total += countSubtreeBounded(child, depth + 1, flatIndexStart + total);
+            if (flatIndexStart + total >= MAX_DUMP_NODES) return total;
         }
         return total;
     }
@@ -911,13 +1068,23 @@ public class HermesAccessibilityService extends AccessibilityService {
             File dir = new File(getCacheDir(), "screenshots");
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
-            // Purge stale JPEGs so screenshots don't accumulate indefinitely
-            // in app-private cache (potential exposure via backup or root).
+            // Keep the most recent N frames so an agent can fetch the previous
+            // screenshot by `path` (diffing without re-capturing). Older ones
+            // get deleted to cap cache growth.
             File[] existing = dir.listFiles();
-            if (existing != null) {
-                for (File f : existing) {
-                    //noinspection ResultOfMethodCallIgnored
-                    f.delete();
+            if (existing != null && existing.length > 0) {
+                final int KEEP = 3;
+                if (existing.length >= KEEP) {
+                    java.util.Arrays.sort(existing, new java.util.Comparator<File>() {
+                        @Override public int compare(File a, File b) {
+                            return Long.compare(a.lastModified(), b.lastModified());
+                        }
+                    });
+                    int remove = existing.length - (KEEP - 1);
+                    for (int i = 0; i < remove; i++) {
+                        //noinspection ResultOfMethodCallIgnored
+                        existing[i].delete();
+                    }
                 }
             }
             File out = new File(dir, "screenshot-" + System.currentTimeMillis() + ".jpg");
@@ -973,9 +1140,16 @@ public class HermesAccessibilityService extends AccessibilityService {
      * metadata overhead of {@link #takeScreenshotToJson(JSONObject)}.
      */
     public byte[] captureScreenJpeg(float scale, int quality) {
+        return captureScreenJpeg(scale, quality, DEFAULT_MAX_EDGE);
+    }
+
+    /** Variant that lets the caller cap the longest edge (0 = no cap).
+     *  Used by watch/streaming callers that may want higher-res frames. */
+    public byte[] captureScreenJpeg(float scale, int quality, int maxEdgeOverride) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null;
         final float s = clampScale(scale);
         final int q = Math.max(1, Math.min(100, quality));
+        final int maxEdge = Math.max(0, maxEdgeOverride);
 
         final CountDownLatch latch = new CountDownLatch(1);
         final AtomicReference<Bitmap> bitmapRef = new AtomicReference<>();
@@ -1027,11 +1201,13 @@ public class HermesAccessibilityService extends AccessibilityService {
             targetW = Math.max(1, Math.round(origW * s));
             targetH = Math.max(1, Math.round(origH * s));
         }
-        int longest = Math.max(targetW, targetH);
-        if (longest > DEFAULT_MAX_EDGE) {
-            float cap = (float) DEFAULT_MAX_EDGE / (float) longest;
-            targetW = Math.max(1, Math.round(targetW * cap));
-            targetH = Math.max(1, Math.round(targetH * cap));
+        if (maxEdge > 0) {
+            int longest = Math.max(targetW, targetH);
+            if (longest > maxEdge) {
+                float cap = (float) maxEdge / (float) longest;
+                targetW = Math.max(1, Math.round(targetW * cap));
+                targetH = Math.max(1, Math.round(targetH * cap));
+            }
         }
 
         Bitmap toEncode = bmp;
