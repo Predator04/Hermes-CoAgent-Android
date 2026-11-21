@@ -287,6 +287,30 @@ public class HermesAccessibilityService extends AccessibilityService {
         return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 
+    /** Detect the soft keyboard (IME) window: visible + height + top edge. */
+    public org.json.JSONObject keyboardInfo() {
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            out.put("visible", false);
+            out.put("height", 0);
+            out.put("top", 0);
+            java.util.List<android.view.accessibility.AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (android.view.accessibility.AccessibilityWindowInfo w : wins) {
+                    if (w != null && w.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                        android.graphics.Rect b = new android.graphics.Rect();
+                        w.getBoundsInScreen(b);
+                        out.put("visible", true);
+                        out.put("height", b.height());
+                        out.put("top", b.top);
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return out;
+    }
+
     public boolean type(String text) {
         if (text == null) return false;
         AccessibilityNodeInfo root = getRootInActiveWindow();

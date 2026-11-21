@@ -321,7 +321,12 @@ public final class CommandExecutor {
             case "key": {
                 HermesAccessibilityService s = HermesAccessibilityService.instance;
                 if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
-                else resp.put("ok", s.globalAction(req.optString("code")));
+                else {
+                    String code = req.optString("code");
+                    if (code.isEmpty()) code = req.optString("key");
+                    if (code.isEmpty()) code = req.optString("keys");
+                    resp.put("ok", s.globalAction(code));
+                }
                 break;
             }
             case "launch": {
@@ -342,6 +347,18 @@ public final class CommandExecutor {
             case "battery":
                 fillBattery(ctx, resp);
                 break;
+            case "keyboard": {
+                HermesAccessibilityService s = HermesAccessibilityService.instance;
+                if (s == null) { resp.put("ok", false); resp.put("error", "accessibility not enabled"); }
+                else {
+                    org.json.JSONObject kb = s.keyboardInfo();
+                    resp.put("ok", true);
+                    resp.put("visible", kb.optBoolean("visible"));
+                    resp.put("height", kb.optInt("height"));
+                    resp.put("top", kb.optInt("top"));
+                }
+                break;
+            }
             case "storage":
                 fillStorage(ctx, resp);
                 break;
@@ -403,6 +420,7 @@ public final class CommandExecutor {
                         resp.put("nodes", nodes);
                         resp.put("count", nodes.length());
                         resp.put("package", pkg);
+                        resp.put("keyboard", s.keyboardInfo());
                         if (sensitive) resp.put("redacted", true);
                     }
                 }

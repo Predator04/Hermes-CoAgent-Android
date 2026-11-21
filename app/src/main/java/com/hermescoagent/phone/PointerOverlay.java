@@ -38,6 +38,7 @@ public final class PointerOverlay extends View {
     private float pulse = 0.6f; // breathing ring, 0..1
     private boolean attached;
     private ValueAnimator pulseAnim;
+    private ValueAnimator moveAnim;
 
     private PointerOverlay(Context ctx) {
         super(ctx);
@@ -73,11 +74,21 @@ public final class PointerOverlay extends View {
         main.post(() -> {
             try {
                 attachIfNeeded(app);
-                cx = x;
-                cy = y;
+                final float fromX = cx, fromY = cy;
+                final float toX = x, toY = y;
+                if (moveAnim != null) { try { moveAnim.cancel(); } catch (Throwable ignored) {} }
+                moveAnim = ValueAnimator.ofFloat(0f, 1f);
+                moveAnim.setDuration(140);
+                moveAnim.addUpdateListener(a -> {
+                    float t = (float) a.getAnimatedValue();
+                    float ease = t * t * (3f - 2f * t); // smoothstep
+                    cx = fromX + (toX - fromX) * ease;
+                    cy = fromY + (toY - fromY) * ease;
+                    invalidate();
+                });
+                moveAnim.start();
                 hue = (hue + 40f) % 360f;
                 startPulse();
-                invalidate();
             } catch (Throwable ignored) {}
         });
     }
@@ -145,25 +156,35 @@ public final class PointerOverlay extends View {
     protected void onDraw(Canvas canvas) {
         if (!attached) return;
         int color = Color.HSVToColor(new float[]{hue, 0.85f, 1f});
-        float r = dp(20) + dp(8) * pulse;
 
-        fillPaint.setColor(color);
-        fillPaint.setAlpha(220);
-        canvas.drawCircle(cx, cy, dp(8), fillPaint);
+        // Mouse-pointer arrow (white fill, black outline) with tip at (cx, cy).
+        android.graphics.Path arrow = new android.graphics.Path();
+        float u = dp(1);
+        arrow.moveTo(cx, cy);                                   // tip
+        arrow.lineTo(cx + 14 * u, cy + 10 * u);                 // right edge
+        arrow.lineTo(cx + 6 * u, cy + 9 * u);                   // notch
+        arrow.lineTo(cx + 6 * u, cy + 22 * u);                  // tail down
+        arrow.lineTo(cx + 3.5f * u, cy + 22 * u);               // tail left
+        arrow.lineTo(cx + 3.5f * u, cy + 8 * u);                // tail up
+        arrow.close();
 
+        fillPaint.setStyle(Paint.Style.FILL);
+        fillPaint.setColor(Color.WHITE);
+        fillPaint.setAlpha(240);
+        canvas.drawPath(arrow, fillPaint);
+
+        ringPaint.setStyle(Paint.Style.STROKE);
+        ringPaint.setColor(Color.BLACK);
+        ringPaint.setAlpha(210);
+        ringPaint.setStrokeWidth(dp(2));
+        canvas.drawPath(arrow, ringPaint);
+
+        // Breathing ring around the tip marks the exact tap point.
+        float r = dp(14) + dp(8) * pulse;
         ringPaint.setColor(color);
-        ringPaint.setAlpha((int) (235 * pulse));
+        ringPaint.setAlpha((int) (210 * pulse));
         ringPaint.setStrokeWidth(dp(3));
         canvas.drawCircle(cx, cy, r, ringPaint);
-
-        crossPaint.setColor(color);
-        crossPaint.setAlpha(210);
-        crossPaint.setStrokeWidth(dp(2));
-        float arm = dp(14);
-        canvas.drawLine(cx - arm, cy, cx - dp(9), cy, crossPaint);
-        canvas.drawLine(cx + dp(9), cy, cx + arm, cy, crossPaint);
-        canvas.drawLine(cx, cy - arm, cx, cy - dp(9), crossPaint);
-        canvas.drawLine(cx, cy + dp(9), cx, cy + arm, crossPaint);
     }
 
     private int dp(int v) {
