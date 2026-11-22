@@ -13,6 +13,7 @@ import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -29,9 +30,13 @@ import android.hardware.camera2.CameraManager;
 import android.location.Location;
 import android.location.LocationManager;
 import android.media.AudioManager;
+import android.media.MediaMetadata;
 import android.media.MediaPlayer;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
@@ -121,6 +126,9 @@ public final class CommandExecutor {
     // ─── TTS ─────────────────────────────────────────────────────────────
     private static TextToSpeech tts;
     private static volatile boolean ttsReady;
+
+    // Kept so the OS does not drop the session controller we hold.
+    private static MediaController activeController;
 
     // ─── find_phone safety auto-stop ─────────────────────────────────────
     private static ScheduledExecutorService findPhoneScheduler;
@@ -612,6 +620,9 @@ public final class CommandExecutor {
             case "volume":
                 volume(ctx, req, resp);
                 break;
+            case "media_control":
+                mediaControl(ctx, req, resp);
+                break;
             case "wifi":
                 fillWifi(ctx, resp);
                 break;
@@ -1017,6 +1028,7 @@ public final class CommandExecutor {
         arr.put(helpEntry("sim_events", "", "security", "SIM change events"));
         arr.put(helpEntry("privacy", "on", "security", "Toggle privacy redaction"));
         arr.put(helpEntry("volume", "", "security", "Get or set volume"));
+        arr.put(helpEntry("media_control", "command,position_ms", "security", "Control media playback (play, pause, next, previous, stop, toggle, seek, info) and read current track; needs notification access"));
         arr.put(helpEntry("ping", "", "security", "Health check"));
         arr.put(helpEntry("shutdown", "", "security", "Stop the remote control service"));
         arr.put(helpEntry("watch", "", "security", "Watch for events"));
@@ -1682,6 +1694,115 @@ public final class CommandExecutor {
                 streams.put(names[i], o);
             }
             resp.put("streams", streams);
+        } catch (Exception e) {
+            try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+    }
+
+    // ────────────────────────── media_control ────────────────────────────
+
+    private static void mediaControl(Context ctx, JSONObject req, JSONObject resp) {
+        try {
+            String command = req.optString("command", "");
+            if (command.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "command required");
+                return;
+            }
+            MediaSessionManager mgr = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            if (mgr == null) {
+                resp.put("ok", false);
+                resp.put("error", "no media session service");
+                return;
+            }
+            List<MediaController> controllers;
+            try {
+                controllers = mgr.getActiveSessions(new ComponentName(ctx, HermesNotificationListener.class));
+            } catch (SecurityException se) {
+                resp.put("ok", false);
+                resp.put("error", "notification access not granted");
+                return;
+            }
+            if (controllers == null || controllers.isEmpty()) {
+                resp.put("ok", false);
+                resp.put("error", "no active media session (grant notification access)");
+                return;
+            }
+            MediaController controller = controllers.get(0);
+            activeController = controller;
+
+            switch (command) {
+                case "play":
+                    controller.getTransportControls().play();
+                    break;
+                case "pause":
+                    controller.getTransportControls().pause();
+                    break;
+                case "next":
+                    controller.getTransportControls().skipToNext();
+                    break;
+                case "previous":
+                    controller.getTransportControls().skipToPrevious();
+                    break;
+                case "stop":
+                    controller.getTransportControls().stop();
+                    break;
+                case "toggle": {
+                    PlaybackState tps = controller.getPlaybackState();
+                    if (tps != null && tps.getState() == PlaybackState.STATE_PLAYING) {
+                        controller.getTransportControls().pause();
+                    } else {
+                        controller.getTransportControls().play();
+                    }
+                    break;
+                }
+                case "seek": {
+                    if (!req.has("position_ms")) {
+                        resp.put("ok", false);
+                        resp.put("error", "position_ms required for seek");
+                        return;
+                    }
+                    long positionMs = req.optLong("position_ms", 0L);
+                    controller.getTransportControls().seekTo(positionMs);
+                    break;
+                }
+                case "info":
+                    break;
+                default:
+                    resp.put("ok", false);
+                    resp.put("error", "unknown command: " + command);
+                    return;
+            }
+
+            PlaybackState ps = controller.getPlaybackState();
+            MediaMetadata md = controller.getMetadata();
+            String stateStr;
+            int rawState = ps != null ? ps.getState() : -1;
+            switch (rawState) {
+                case PlaybackState.STATE_PLAYING: stateStr = "playing"; break;
+                case PlaybackState.STATE_PAUSED: stateStr = "paused"; break;
+                case PlaybackState.STATE_STOPPED: stateStr = "stopped"; break;
+                case PlaybackState.STATE_BUFFERING: stateStr = "buffering"; break;
+                case PlaybackState.STATE_CONNECTING: stateStr = "connecting"; break;
+                case PlaybackState.STATE_ERROR: stateStr = "error"; break;
+                case PlaybackState.STATE_NONE: stateStr = "none"; break;
+                case PlaybackState.STATE_SKIPPING_TO_NEXT: stateStr = "skipping_next"; break;
+                case PlaybackState.STATE_SKIPPING_TO_PREVIOUS: stateStr = "skipping_previous"; break;
+                case PlaybackState.STATE_SKIPPING_TO_QUEUE_ITEM: stateStr = "skipping_queue"; break;
+                default: stateStr = "unknown";
+            }
+            resp.put("command", command);
+            resp.put("state", stateStr);
+            resp.put("playing", rawState == PlaybackState.STATE_PLAYING);
+            resp.put("position_ms", ps != null ? ps.getPosition() : 0);
+            resp.put("package", controller.getPackageName());
+            if (md != null) {
+                resp.put("track", md.getString(MediaMetadata.METADATA_KEY_TITLE));
+                resp.put("artist", md.getString(MediaMetadata.METADATA_KEY_ARTIST));
+                resp.put("album", md.getString(MediaMetadata.METADATA_KEY_ALBUM));
+                resp.put("duration_ms", md.getLong(MediaMetadata.METADATA_KEY_DURATION));
+            }
+            resp.put("ok", true);
         } catch (Exception e) {
             try { resp.put("ok", false); resp.put("error", String.valueOf(e)); } catch (Exception ignored) {}
         }
