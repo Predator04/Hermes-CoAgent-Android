@@ -1650,6 +1650,20 @@ public final class CommandExecutor {
                 int level = req.optInt("level", am.getStreamVolume(stream));
                 int clamped = Math.max(0, Math.min(max, level));
                 am.setStreamVolume(stream, clamped, 0);
+                // Fallback: Android 15+ can no-op setStreamVolume for non-system apps.
+                // Step with adjustStreamVolume (the volume-button path) until it lands.
+                int actual = am.getStreamVolume(stream);
+                if (actual != clamped) {
+                    int dir = actual < clamped ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER;
+                    for (int i = 0; i < 200; i++) {
+                        am.adjustStreamVolume(stream, dir, 0);
+                        int next = am.getStreamVolume(stream);
+                        if (next == actual) break;
+                        actual = next;
+                        if (dir == AudioManager.ADJUST_RAISE && actual >= clamped) break;
+                        if (dir == AudioManager.ADJUST_LOWER && actual <= clamped) break;
+                    }
+                }
                 resp.put("stream", streamName.toLowerCase(Locale.US));
                 resp.put("level", clamped);
                 resp.put("max", max);
